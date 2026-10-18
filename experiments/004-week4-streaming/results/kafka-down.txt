@@ -1,0 +1,11 @@
+t=25s stop kafka-1..3
+  +15s down: spool_bytes=11653 spooled=51 delivered=246
+  +30s down: spool_bytes=21934 spooled=96 delivered=246
+  +45s down: spool_bytes=30847 spooled=135 delivered=246
+  +60s down: spool_bytes=42046 spooled=184 delivered=246
+start kafka
+bots: {"connects":100,"connect_failures":0,"rtt_ms":{"n":200000,"p50":27.88,"p95":48.98,"p99":51.213},"tick_p99":0.4360655737704928,"tick_overruns":0}
+durable events: queued=883 delivered=511 spooled=372 replayed=372 dropped_queue_full=0 spool_bytes_now=0
+spool drained: spool_bytes=0 replayed=372
+this server instance (6289b847906d): records=883 distinct_event_ids=883 duplicates=0 lost=0 (of 883 queued)
+topic growth: match +683, player +200

@@ -1,0 +1,2 @@
+1 match (20 bots), records per partition: 0 0 0 0 0 24
+10 matches (200 bots), records per partition: 56 69 29 0 46 75

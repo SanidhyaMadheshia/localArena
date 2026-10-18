@@ -1,0 +1,2 @@
+additive field:            compatible (dry run, nothing registered)
+int64 -> string on field:  REJECTED (400): Incompatible artifact: localarena.events.v1.Envelope [PROTOBUF], num of incompatible diffs: {1}, list of diff types: [Field type changed, message PlayerScored , before: int64 , after string at /PlayerScored] Causes: Field type changed, message PlayerScored , before: int64 , after string at /PlayerScored

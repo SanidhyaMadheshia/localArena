@@ -31,6 +31,12 @@ x-pg-cmd: &pgcmd
   - track_io_timing=on
   - -c
   - max_connections=100
+  - -c
+  - wal_level=logical # Debezium CDC (outbox); also keeps physical replication working
+  - -c
+  - max_replication_slots=10
+  - -c
+  - max_wal_senders=10
 
 services:
   gameserver:
@@ -39,8 +45,14 @@ services:
     pull_policy: build
     # pprof listens on all container interfaces but is published on host loopback only.
     ports: ["8080:8080", "127.0.0.1:6060:6060"]
-    environment: { DEBUG_ADDR: ":6060", LOG_LEVEL: info }
-    command: ["-tick-hz", "20", "-capacity", "20"]
+    environment:
+      DEBUG_ADDR: ":6060"
+      LOG_LEVEL: info
+      # Events are optional: unreachable brokers only mean spooling (adr/0009).
+      KAFKA_BROKERS: ${GAMESERVER_KAFKA:-kafka-1:19092,kafka-2:19092,kafka-3:19092}
+      EVENT_SPOOL_DIR: /var/lib/gameserver/spool
+    command: ["-tick-hz", "20", "-capacity", "20", "-round-seconds", "${ROUND_SECONDS:-120}"]
+    volumes: ["gameserver-spool:/var/lib/gameserver"]
     deploy:
       resources:
         limits: { cpus: "2", memory: 512M }
@@ -175,6 +187,157 @@ services:
     hostname: edge-b
     ports: ["8091:80"]
 
+  # ---- Week 4 "streaming" profile: docker compose --profile streaming up -d ----
+  # 3 combined broker+controller nodes in KRaft mode (no ZooKeeper), pattern from
+  # apache/kafka docker/examples (cluster/combined/plaintext). Internal listener
+  # kafka-N:19092; host listener localhost:2N092. Heap capped for an 8 GiB Docker VM.
+  kafka-1: &kafka
+    profiles: ["streaming"]
+    image: apache/kafka:4.3.1
+    hostname: kafka-1
+    environment: &kenv
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_LISTENERS: PLAINTEXT://:19092,CONTROLLER://:9093,HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:19092,HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: bG9jYWxhcmVuYS1rYWZrYQ
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Durability defaults: RF 3, min ISR 2 -> acks=all survives one broker loss.
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false" # topics are explicit design decisions (scripts/kafka-topics.sh)
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xmx384m -Xms384m
+    ports: ["127.0.0.1:29092:9092"]
+    volumes: ["kafka-1:/var/lib/kafka/data"]
+    deploy: { resources: { limits: { memory: 768M } } }
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+  kafka-2:
+    <<: *kafka
+    hostname: kafka-2
+    environment:
+      <<: *kenv
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:19092,HOST://localhost:39092
+    ports: ["127.0.0.1:39092:9092"]
+    volumes: ["kafka-2:/var/lib/kafka/data"]
+  kafka-3:
+    <<: *kafka
+    hostname: kafka-3
+    environment:
+      <<: *kenv
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:19092,HOST://localhost:49092
+    ports: ["127.0.0.1:49092:9092"]
+    volumes: ["kafka-3:/var/lib/kafka/data"]
+
+  kafka-ui:
+    profiles: ["streaming"]
+    image: kafbat/kafka-ui:v1.5.0
+    environment:
+      KAFKA_CLUSTERS_0_NAME: localarena
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+      JAVA_OPTS: -Xmx256m
+    ports: ["127.0.0.1:8085:8080"] # no auth: loopback only
+    depends_on: [kafka-1]
+    deploy: { resources: { limits: { memory: 512M } } }
+
+  # Schema registry (protobuf contracts, compatibility rules). In-memory storage:
+  # schemas are re-registered from schemas/ by scripts/register-schemas.sh.
+  apicurio:
+    profiles: ["streaming"]
+    image: apicurio/apicurio-registry:3.3.3
+    environment:
+      APICURIO_STORAGE_KIND: sql
+      APICURIO_STORAGE_SQL_KIND: h2
+      JAVA_OPTS_APPEND: -Xmx256m
+    ports: ["127.0.0.1:8086:8080"]
+    deploy: { resources: { limits: { memory: 512M } } }
+
+  # Kafka Connect + Debezium: publishes the PostgreSQL outbox (adr/0010).
+  connect:
+    profiles: ["streaming"]
+    image: quay.io/debezium/connect:3.7.0.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      GROUP_ID: localarena-connect
+      CONFIG_STORAGE_TOPIC: connect.configs
+      OFFSET_STORAGE_TOPIC: connect.offsets
+      STATUS_STORAGE_TOPIC: connect.status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      STATUS_STORAGE_REPLICATION_FACTOR: 3
+      HEAP_OPTS: -Xmx384m
+      # Secrets are resolved inside the worker (${env:...}), never stored in connector configs.
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localarena-dev}
+    ports: ["127.0.0.1:8083:8083"] # REST API has no auth: loopback only
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    deploy: { resources: { limits: { memory: 768M } } }
+    restart: unless-stopped
+
+  # Kafka Streams (leaderboard + sessions), 2 instances of one application id:
+  # partitions/tasks split between them; 1 standby replica each for fast failover.
+  streams-1: &streams
+    profiles: ["streaming"]
+    build: { context: ., dockerfile: streams/Dockerfile }
+    image: localarena/streams:dev
+    pull_policy: build
+    hostname: streams-1
+    environment: &senv
+      KAFKA_BROKERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      ADVERTISED_HOST: streams-1
+      PORT: "7070"
+      STANDBY_REPLICAS: ${STREAMS_STANDBY:-1}
+    ports: ["127.0.0.1:7071:7070"]
+    volumes: ["streams-1:/var/lib/streams"]
+    depends_on: { kafka-1: { condition: service_healthy } }
+    deploy: { resources: { limits: { memory: 512M } } }
+    restart: unless-stopped
+  streams-2:
+    <<: *streams
+    hostname: streams-2
+    environment:
+      <<: *senv
+      ADVERTISED_HOST: streams-2
+    ports: ["127.0.0.1:7072:7070"]
+    volumes: ["streams-2:/var/lib/streams"]
+
+  # Reward saga worker (Go): match-events -> reward commands -> Postgres steps -> outbox.
+  rewards:
+    profiles: ["streaming"]
+    image: localarena/api:dev
+    pull_policy: build
+    build: { context: ., target: api }
+    entrypoint: ["/rewards"]
+    environment:
+      KAFKA_BROKERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      DATABASE_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@pgbouncer:5432/localarena
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    deploy: { resources: { limits: { memory: 128M } } }
+    restart: unless-stopped
+
   pg-shard0:
     <<: *pg
     profiles: ["shards"]
@@ -204,6 +367,12 @@ services:
     depends_on: [gameserver]
 
 volumes:
+  gameserver-spool:
+  streams-1:
+  streams-2:
+  kafka-1:
+  kafka-2:
+  kafka-3:
   garage-data:
   pg-primary:
   pg-replica:

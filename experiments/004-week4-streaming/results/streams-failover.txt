@@ -1,0 +1,3 @@
+kill -9 streams-2 (standby replicas: 1)
+  serving all partitions from streams-1 after 11.06 s; totals identical: yes
+  streams-2 rejoined

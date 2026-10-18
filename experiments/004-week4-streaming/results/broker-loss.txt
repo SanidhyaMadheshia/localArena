@@ -1,0 +1,8 @@
+kill -9 kafka-2
+  under-replicated partitions: 61
+  sample: Leader: 3 Replicas: 3,1,2 Isr: 1,3
+  match events written with 2/3 brokers: +63  delivered=647 spooled=383
+kill -9 kafka-3 (1/3 left, below min.insync.replicas=2)
+  +25s: match events written: +-1387  spooled +88
+restarted; under-replicated now: 0; spool_bytes=0 replayed=531
+bots: {"connect_failures":0,"rtt_ms":{"n":68217,"p50":48.805,"p95":52.206,"p99":53.354},"tick_p99":0.46253472222222236}

@@ -2,14 +2,44 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	eventsv1 "github.com/SanidhyaMadheshia/localArena/backend/gen/events/v1"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/eventid"
 )
+
+// insertOutbox writes one event in the current transaction: protobuf Envelope
+// for Kafka (envelope) plus a JSON rendering for humans (payload).
+func insertOutbox[T interface {
+	*eventsv1.Envelope_CosmeticPurchased | *eventsv1.Envelope_RewardGranted
+}](
+	ctx context.Context, tx pgx.Tx, typ string, playerID int64, id, causation string, payload T) error {
+	now := timestamppb.Now()
+	env := &eventsv1.Envelope{EventId: id, EventTime: now, ProducedAt: now, SchemaVersion: 1,
+		CorrelationId: causation, CausationId: causation, Source: "api/economy"}
+	switch p := any(payload).(type) {
+	case *eventsv1.Envelope_CosmeticPurchased:
+		env.Payload = p
+	case *eventsv1.Envelope_RewardGranted:
+		env.Payload = p
+	}
+	bin, err := proto.Marshal(env)
+	if err != nil {
+		return err
+	}
+	js, _ := protojson.Marshal(env)
+	_, err = tx.Exec(ctx, `INSERT INTO outbox (id, aggregatetype, aggregateid, type, payload, envelope)
+		VALUES ($1::uuid, 'player', $2, $3, $4, $5)`, id, strconv.FormatInt(playerID, 10), typ, js, bin)
+	return err
+}
 
 // Strategy selects how a purchase protects stock and credits (Experiment 002).
 type Strategy int
@@ -92,12 +122,11 @@ func (s *Store) Purchase(ctx context.Context, playerID, cosmeticID int64, key st
 		if _, err := tx.Exec(ctx, `UPDATE purchases SET price = $2 WHERE id = $1`, r.PurchaseID, r.Price); err != nil {
 			return err
 		}
-		// 4. Outbox: committed atomically with the state change (published by Debezium in week 4).
-		payload, _ := json.Marshal(map[string]any{"purchase_id": r.PurchaseID, "player_id": playerID,
-			"cosmetic_id": cosmeticID, "price": r.Price, "idempotency_key": key})
-		_, err = tx.Exec(ctx, `INSERT INTO outbox (aggregatetype, aggregateid, type, payload) VALUES ('player', $1, 'CosmeticPurchased', $2)`,
-			strconv.FormatInt(playerID, 10), payload)
-		return err
+		// 4. Outbox: committed atomically with the state change; Debezium
+		// publishes it (adr/0010). The row ID is the deterministic event ID.
+		return insertOutbox(ctx, tx, "CosmeticPurchased", playerID, eventid.New("purchase", strconv.FormatInt(r.PurchaseID, 10)), key,
+			&eventsv1.Envelope_CosmeticPurchased{CosmeticPurchased: &eventsv1.CosmeticPurchased{
+				PurchaseId: r.PurchaseID, PlayerId: playerID, CosmeticId: cosmeticID, Price: r.Price, IdempotencyKey: key}})
 	})
 	if pgCode(err) == codeCheckViolation {
 		// A CHECK constraint caught what the strategy missed (only possible for Naive).

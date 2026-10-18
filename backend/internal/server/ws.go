@@ -5,11 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/engine"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/protocol"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/telemetry"
@@ -49,7 +51,19 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return // Upgrade already replied with an HTTP error
 	}
-	m, c, err := s.mgr.Join()
+	// SECURITY: ?player=<account id> is trusted until auth exists (week 5);
+	// without it the session is a guest. One live session per account.
+	var account engine.PlayerID
+	if v, err := strconv.ParseUint(r.URL.Query().Get("player"), 10, 32); err == nil {
+		account = engine.PlayerID(v)
+	}
+	m, c, err := s.mgr.Join(account)
+	if errors.Is(err, match.ErrAlreadyPlaying) {
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "already connected"), time.Now().Add(writeWait))
+		_ = conn.Close()
+		return
+	}
 	if err != nil {
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "server shutting down"), time.Now().Add(writeWait))

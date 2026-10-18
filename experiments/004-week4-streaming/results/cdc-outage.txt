@@ -1,0 +1,5 @@
+connect stopped
+  200 purchases committed while CDC was down; topic +0
+  replication slot retained WAL: 674 kB
+  connect started, then kill -9 after 4 s (mid-backlog)
+  after recovery: records=200 distinct=200 committed=200 (lost=0, duplicates=0)

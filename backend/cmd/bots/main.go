@@ -44,6 +44,8 @@ type config struct {
 	slow     float64
 	churn    time.Duration
 	jsonOut  bool
+
+	accountBase int
 }
 
 // stats is shared by all bots; samples are bounded per bot to cap memory.
@@ -78,6 +80,7 @@ func main() {
 	flag.Float64Var(&c.slow, "slow", 0, "fraction of bots that read slowly [0,1]")
 	flag.DurationVar(&c.churn, "churn", 0, "mean session lifetime before reconnect; 0 disables")
 	flag.BoolVar(&c.jsonOut, "json", false, "print the report as JSON")
+	flag.IntVar(&c.accountBase, "accounts", 0, "if >0, bot i plays as account accountBase+i (?player=); else guests")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -106,7 +109,11 @@ func main() {
 			case <-runCtx.Done():
 				return
 			}
-			runBot(runCtx, c, slow, measureStart, st)
+			url := wsURL(c.server)
+			if c.accountBase > 0 {
+				url += fmt.Sprintf("?player=%d", c.accountBase+i)
+			}
+			runBot(runCtx, c, url, slow, measureStart, st)
 		})
 	}
 
@@ -136,13 +143,13 @@ func wsURL(base string) string {
 }
 
 // runBot keeps one logical player connected until ctx ends, reconnecting on churn or failure.
-func runBot(ctx context.Context, c config, slow bool, measureStart time.Time, st *stats) {
+func runBot(ctx context.Context, c config, url string, slow bool, measureStart time.Time, st *stats) {
 	for ctx.Err() == nil {
 		life := time.Duration(0)
 		if c.churn > 0 {
 			life = time.Duration(rand.ExpFloat64() * float64(c.churn))
 		}
-		if err := session(ctx, c, slow, life, measureStart, st); err != nil {
+		if err := session(ctx, c, url, slow, life, measureStart, st); err != nil {
 			st.failures.Add(1)
 			select { // backoff with jitter so failures don't become a reconnect storm
 			case <-time.After(100*time.Millisecond + rand.N(400*time.Millisecond)):
@@ -154,9 +161,9 @@ func runBot(ctx context.Context, c config, slow bool, measureStart time.Time, st
 
 const maxSamplesPerSession = 2000
 
-func session(ctx context.Context, c config, slow bool, life time.Duration, measureStart time.Time, st *stats) error {
+func session(ctx context.Context, c config, url string, slow bool, life time.Duration, measureStart time.Time, st *stats) error {
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
-	conn, _, err := dialer.DialContext(ctx, wsURL(c.server), nil)
+	conn, _, err := dialer.DialContext(ctx, url, nil)
 	if err != nil {
 		return err
 	}

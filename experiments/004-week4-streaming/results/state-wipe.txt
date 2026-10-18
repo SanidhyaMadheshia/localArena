@@ -1,0 +1,8 @@
+both instances stopped, both state volumes deleted
+  restored to RUNNING in 10.86 s; totals identical to before: yes
+Finished restoring changelog localarena-streams-final-sessions-store-changelog-1 to store final-sessions-store with a total number of 535 records
+Finished restoring changelog localarena-streams-final-sessions-store-changelog-3 to store final-sessions-store with a total number of 587 records
+Finished restoring changelog localarena-streams-final-sessions-store-changelog-5 to store final-sessions-store with a total number of 358 records
+Finished restoring changelog localarena-streams-leaderboard-totals-changelog-1 to store leaderboard-totals with a total number of 155 records
+Finished restoring changelog localarena-streams-leaderboard-totals-changelog-3 to store leaderboard-totals with a total number of 175 records
+Finished restoring changelog localarena-streams-leaderboard-totals-changelog-5 to store leaderboard-totals with a total number of 99 records

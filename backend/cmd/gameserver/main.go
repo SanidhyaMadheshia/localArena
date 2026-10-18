@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/events"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/server"
 )
@@ -32,6 +33,9 @@ func main() {
 		webDir    = flag.String("web", env("WEB_DIR", ""), "static client directory")
 		origins   = flag.String("allowed-origins", env("ALLOWED_ORIGINS", ""), "comma-separated extra WebSocket origin hosts")
 		logLevel  = flag.String("log-level", env("LOG_LEVEL", "info"), "debug|info|warn|error")
+		brokers   = flag.String("kafka", env("KAFKA_BROKERS", ""), "comma-separated Kafka brokers; empty disables events")
+		spoolDir  = flag.String("spool-dir", env("EVENT_SPOOL_DIR", ""), "durable event spool directory (used while Kafka is unavailable)")
+		roundSecs = flag.Int("round-seconds", 120, "match round length; each round ends with MatchCompleted")
 	)
 	flag.Parse()
 
@@ -42,7 +46,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mgr := match.NewManager(match.Options{TickHz: *tickHz, Capacity: *capacity, Seed: *seed})
+	var pub *events.Publisher
+	if *brokers != "" {
+		host, _ := os.Hostname()
+		var err error
+		pub, err = events.New(events.Options{Brokers: split(*brokers), Source: "gameserver/" + host, SpoolDir: *spoolDir}, log)
+		if err != nil {
+			log.Error("events", "err", err)
+			os.Exit(1)
+		}
+		log.Info("publishing events", "brokers", *brokers, "spool", *spoolDir)
+	}
+	mgr := match.NewManager(match.Options{TickHz: *tickHz, Capacity: *capacity, Seed: *seed,
+		Events: pub, RoundTicks: uint64(max(*roundSecs, 0) * *tickHz)}) // #nosec G115 -- clamped non-negative
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           server.New(mgr, log, server.Config{WebDir: *webDir, AllowedOrigins: split(*origins)}).Handler(),
@@ -84,6 +100,9 @@ func main() {
 		log.Warn("http shutdown", "err", err)
 	}
 	mgr.Close()
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelFlush()
+	pub.Close(flushCtx) // undelivered durable events stay in the spool for the next start
 	log.Info("stopped")
 }
 

@@ -97,3 +97,26 @@ down:
 
 logs:
 	docker compose logs -f gameserver
+
+# ---- Week 4 streaming (Kafka, Apicurio, Debezium, Streams, rewards) ----
+.PHONY: stream-up stream-down proto streams-test experiment-004
+stream-up:
+	docker compose --profile streaming up -d --wait kafka-1 kafka-2 kafka-3
+	scripts/kafka-topics.sh
+	docker compose --profile streaming up -d
+	sleep 20
+	scripts/register-schemas.sh
+	scripts/connect.sh
+
+stream-down:
+	docker compose --profile streaming stop
+
+proto:
+	protoc -I schemas -I $(HOME)/.local/include --go_out=backend/gen \
+		--go_opt=module=github.com/SanidhyaMadheshia/localArena/backend/gen schemas/localarena/events/v1/events.proto
+
+streams-test:
+	cd streams && ./gradlew test --no-daemon -q
+
+experiment-004:
+	experiments/004-week4-streaming/run.sh

@@ -2,23 +2,38 @@ package match
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/engine"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/events"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/telemetry"
 )
 
-// ErrClosed is returned when joining after Close.
-var ErrClosed = errors.New("match: manager closed")
+// Errors returned by Join.
+var (
+	ErrClosed         = errors.New("match: manager closed")
+	ErrAlreadyPlaying = errors.New("match: player already connected")
+)
+
+// GuestIDBase is the first ID for sessions without an account. Account IDs
+// (PostgreSQL players.id) are below it, so downstream consumers can tell
+// guests apart (e.g. guests earn no credits).
+const GuestIDBase engine.PlayerID = 1_000_000_000
 
 // Options configures a Manager.
 type Options struct {
 	TickHz   int    // fixed simulation rate, default 20
 	Capacity int    // players per match, default 20
 	Seed     uint64 // base seed; each match derives its own
+
+	Events     *events.Publisher // nil disables event publishing
+	RoundTicks uint64            // ticks per round; 0 = endless (tests)
+	InstanceID string            // unique per process start; default random
 }
 
 // Manager assigns players to matches, creating matches on demand and stopping
@@ -31,6 +46,7 @@ type Manager struct {
 	nextID atomic.Uint32
 
 	mu      sync.Mutex
+	active  map[engine.PlayerID]bool
 	matches []*slot
 	nextM   int
 	closed  bool
@@ -53,17 +69,37 @@ func NewManager(opts Options) *Manager {
 	if opts.Capacity <= 0 {
 		opts.Capacity = 20
 	}
+	if opts.InstanceID == "" {
+		var b [6]byte
+		_, _ = rand.Read(b[:])
+		opts.InstanceID = hex.EncodeToString(b[:])
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{opts: opts, ctx: ctx, cancel: cancel, changed: make(chan struct{})}
+	mg := &Manager{opts: opts, ctx: ctx, cancel: cancel, changed: make(chan struct{}), active: map[engine.PlayerID]bool{}}
+	mg.nextID.Store(uint32(GuestIDBase) - 1)
+	return mg
 }
 
-// Join places a new player into the first match with free capacity.
-func (mg *Manager) Join() (*Match, *Client, error) {
+// Join places a player into the first match with free capacity. account is
+// the PostgreSQL player ID, or 0 for a guest (a guest ID is assigned).
+func (mg *Manager) Join(account ...engine.PlayerID) (*Match, *Client, error) {
+	id := engine.PlayerID(0)
+	if len(account) > 0 && account[0] > 0 && account[0] < GuestIDBase {
+		id = account[0]
+	}
 	mg.mu.Lock()
 	if mg.closed {
 		mg.mu.Unlock()
 		return nil, nil, ErrClosed
 	}
+	if id == 0 {
+		id = engine.PlayerID(mg.nextID.Add(1))
+	}
+	if mg.active[id] {
+		mg.mu.Unlock()
+		return nil, nil, ErrAlreadyPlaying
+	}
+	mg.active[id] = true
 	var s *slot
 	for _, cand := range mg.matches {
 		if cand.n < mg.opts.Capacity {
@@ -74,7 +110,8 @@ func (mg *Manager) Join() (*Match, *Client, error) {
 	if s == nil {
 		mg.nextM++
 		ctx, cancel := context.WithCancel(mg.ctx)
-		m := newMatch(fmt.Sprintf("m-%d", mg.nextM), mg.opts.TickHz, engine.DefaultConfig(mg.opts.Seed+uint64(mg.nextM))) // #nosec G115 -- nextM is a positive counter
+		m := newMatch(fmt.Sprintf("m-%d", mg.nextM), mg.opts.TickHz, engine.DefaultConfig(mg.opts.Seed+uint64(mg.nextM)), // #nosec G115 -- nextM is a positive counter
+			mg.opts.RoundTicks, mg.opts.Events, mg.opts.InstanceID)
 		s = &slot{m: m, cancel: cancel}
 		mg.matches = append(mg.matches, s)
 		mg.wg.Go(func() { m.run(ctx) })
@@ -84,11 +121,11 @@ func (mg *Manager) Join() (*Match, *Client, error) {
 	mg.bumpLocked()
 	mg.mu.Unlock()
 
-	c := newClient(engine.PlayerID(mg.nextID.Add(1)))
+	c := newClient(id)
 	select {
 	case s.m.join <- c:
 	case <-s.m.done:
-		mg.release(s.m)
+		mg.release(s.m, id)
 		return nil, nil, ErrClosed
 	}
 	telemetry.Players.Inc()
@@ -102,13 +139,14 @@ func (mg *Manager) Leave(m *Match, c *Client) {
 	case <-m.done:
 	}
 	telemetry.Players.Dec()
-	mg.release(m)
+	mg.release(m, c.ID)
 }
 
 // release frees a slot and stops the match when it becomes empty.
-func (mg *Manager) release(m *Match) {
+func (mg *Manager) release(m *Match, id engine.PlayerID) {
 	mg.mu.Lock()
 	defer mg.mu.Unlock()
+	delete(mg.active, id)
 	for i, s := range mg.matches {
 		if s.m != m {
 			continue

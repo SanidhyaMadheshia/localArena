@@ -1,0 +1,137 @@
+// LocalArena event contracts, version 1 (adr/0009).
+//
+// Evolution rules, enforced by Apicurio with BACKWARD compatibility per topic
+// (scripts/register-schemas.sh) and reviewed in PRs:
+//   - never change a field number or type; never reuse a number (use `reserved`);
+//   - add fields only as new numbers (old consumers ignore them);
+//   - removing a field: mark it reserved, keep consumers tolerant of absence;
+//   - a breaking change is a new package (v2) and a new topic (*.v2).
+syntax = "proto3";
+
+package localarena.events.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/SanidhyaMadheshia/localArena/backend/gen/events/v1;eventsv1";
+option java_package = "io.localarena.events.v1";
+option java_multiple_files = true;
+
+// Envelope wraps every event on every topic. Metadata required by the README
+// runtime invariants lives here, so consumers can dedupe, order, and trace
+// without understanding the payload.
+message Envelope {
+  // Deterministic for replayable producers (e.g. hash of match_id/tick/kind), so
+  // a resend after a crash has the same id and consumers dedupe it.
+  string event_id = 1;
+  // When it happened in the domain (game tick time); used for windows.
+  google.protobuf.Timestamp event_time = 2;
+  // When the producer created this record; event_time <= produced_at.
+  google.protobuf.Timestamp produced_at = 3;
+  // Bumped only for breaking changes, which also change the package/topic.
+  uint32 schema_version = 4;
+  // The request/match this event belongs to, end to end.
+  string correlation_id = 5;
+  // The event_id (or request id) that directly caused this one.
+  string causation_id = 6;
+  // Logical producer, e.g. "gameserver/m-12" or "api/purchase".
+  string source = 7;
+
+  oneof payload {
+    MatchStarted match_started = 20;
+    MatchCompleted match_completed = 21;
+    PlayerScored player_scored = 22;
+    PlayerJoined player_joined = 23;
+    PlayerLeft player_left = 24;
+    CosmeticPurchased cosmetic_purchased = 30;
+    RewardGranted reward_granted = 31;
+    RewardCommand reward_command = 32;
+    TickSample tick_sample = 40;
+  }
+}
+
+// Best-effort telemetry: sampled once per second per match, dropped under pressure.
+message TickSample {
+  string server_id = 1;
+  string match_id = 2;
+  uint64 tick = 3;
+  uint32 players = 4;
+  uint32 tick_micros = 5;
+}
+
+message MatchStarted {
+  string match_id = 1;
+  uint64 seed = 2;
+  uint32 tick_hz = 3;
+}
+
+message PlayerResult {
+  int64 player_id = 1;
+  uint32 score = 2;
+}
+
+message MatchCompleted {
+  string match_id = 1;
+  uint64 final_tick = 2;
+  repeated PlayerResult results = 3;
+}
+
+// Emitted when a player's score changes. `score` is the new total for this
+// match (not a delta), so applying it twice is harmless.
+message PlayerScored {
+  string match_id = 1;
+  int64 player_id = 2;
+  uint32 score = 3;
+  uint64 tick = 4;
+}
+
+message PlayerJoined {
+  string match_id = 1;
+  int64 player_id = 2;
+}
+
+message PlayerLeft {
+  string match_id = 1;
+  int64 player_id = 2;
+  string reason = 3;
+}
+
+message CosmeticPurchased {
+  int64 purchase_id = 1;
+  int64 player_id = 2;
+  int64 cosmetic_id = 3;
+  int64 price = 4;
+  string idempotency_key = 5;
+}
+
+// Saga step command: grant a match reward to a player (adr/0011).
+message RewardCommand {
+  string reward_id = 1; // = causing MatchCompleted event_id + player id; the idempotency key
+  int64 player_id = 2;
+  int64 credits = 3;
+  string match_id = 4;
+  uint32 attempt = 5;   // incremented on each retry hop
+  string last_error = 6;
+}
+
+message RewardGranted {
+  string reward_id = 1;
+  int64 player_id = 2;
+  int64 credits = 3;
+}
+
+// ---- Derived topics (produced by Kafka Streams; not wrapped in Envelope) ----
+
+// game.leaderboard-updates.v1, key = player_id (compacted: latest total wins).
+message LeaderboardEntry {
+  int64 player_id = 1;
+  int64 total_score = 2; // sum over matches of the player's final per-match score
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+// game.player-sessions.v1, key = player_id. Emitted once per closed session window.
+message PlayerSession {
+  int64 player_id = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+  int64 events = 4;
+}

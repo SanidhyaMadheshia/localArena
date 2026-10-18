@@ -1,0 +1,2 @@
+poison into match-events: game.invalid-events.v1 +2; streams state: {"state":"RUNNING"} {"state":"RUNNING"}
+poison into reward-commands: dlq +1

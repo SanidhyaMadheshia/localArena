@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/engine"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/events"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/protocol"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/telemetry"
 )
@@ -64,18 +65,23 @@ type Match struct {
 	done   chan struct{}
 
 	tick atomic.Uint64 // published for status readers
+
+	cfg        engine.Config
+	roundTicks uint64 // 0 = endless
+	ev         emitter
 }
 
 // InputQueue bounds pending inputs per match; excess is dropped, not buffered.
 const InputQueue = 1024
 
-func newMatch(id string, tickHz int, cfg engine.Config) *Match {
+func newMatch(id string, tickHz int, cfg engine.Config, roundTicks uint64, pub *events.Publisher, instance string) *Match {
 	return &Match{
-		ID: id, TickHz: tickHz, world: engine.New(cfg),
+		ID: id, TickHz: tickHz, world: engine.New(cfg), cfg: cfg, roundTicks: roundTicks,
 		join:   make(chan *Client),
 		leave:  make(chan engine.PlayerID),
 		inputs: make(chan input, InputQueue),
 		done:   make(chan struct{}),
+		ev:     emitter{pub: pub, instance: instance, matchID: id, tickHz: tickHz},
 	}
 }
 
@@ -115,7 +121,9 @@ func (m *Match) run(ctx context.Context) {
 		players = make([]engine.Player, 0, 32)
 		items   = make([]engine.Item, 0, 16)
 		last    = time.Now()
+		round   = 0
 	)
+	m.ev.startRound(round, m.cfg.Seed)
 	for {
 		select {
 		case <-ctx.Done():
@@ -123,12 +131,14 @@ func (m *Match) run(ctx context.Context) {
 		case c := <-m.join:
 			clients[c.ID] = c
 			m.world.AddPlayer(c.ID)
+			m.ev.joined(c.ID, m.world.Tick())
 		case id := <-m.leave:
 			if c, ok := clients[id]; ok {
 				close(c.Done)
 				delete(clients, id)
 				delete(lastSeq, id)
 				m.world.RemovePlayer(id)
+				m.ev.left(id, m.world.Tick(), "disconnect")
 			}
 		case msg := <-m.inputs:
 			// Sequence numbers make inputs idempotent and drop reordered/duplicate frames.
@@ -150,6 +160,19 @@ func (m *Match) run(ctx context.Context) {
 			m.world.Step()
 			m.tick.Store(m.world.Tick())
 			players, items = m.broadcast(clients, lastSeq, players[:0], items[:0])
+			m.ev.afterStep(players, m.world.Tick(), time.Since(start).Microseconds())
+			if m.roundTicks > 0 && m.world.Tick() >= m.roundTicks {
+				// Round over: publish the result, then a fresh world with the same players.
+				m.ev.completed(players, m.world.Tick())
+				round++
+				cfg := m.cfg
+				cfg.Seed += uint64(round) // #nosec G115 -- round is a small positive counter
+				m.world = engine.New(cfg)
+				for id := range clients {
+					m.world.AddPlayer(id)
+				}
+				m.ev.startRound(round, cfg.Seed)
+			}
 			d := time.Since(start)
 			telemetry.Ticks.Inc()
 			telemetry.TickDuration.Observe(d.Seconds())

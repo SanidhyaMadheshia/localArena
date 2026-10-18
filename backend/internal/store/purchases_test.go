@@ -66,7 +66,7 @@ func TestLimitedStockNeverOversells(t *testing.T) {
 			if v := scalar[int64](t, st.Primary, `SELECT count(*) FROM inventory WHERE cosmetic_id = $1`, item); v != 5 {
 				t.Fatalf("inventory rows = %d", v)
 			}
-			if v := scalar[int64](t, st.Primary, `SELECT count(*) FROM outbox WHERE (payload->>'cosmetic_id')::bigint = $1`, item); v != 5 {
+			if v := scalar[int64](t, st.Primary, `SELECT count(*) FROM outbox WHERE (payload->'cosmeticPurchased'->>'cosmeticId')::bigint = $1 AND envelope IS NOT NULL`, item); v != 5 {
 				t.Fatalf("outbox rows = %d", v)
 			}
 			if v := scalar[int64](t, st.Primary, `SELECT sum(1000 - credits) FROM profiles WHERE player_id = ANY($1)`, buyers); v != 500 {

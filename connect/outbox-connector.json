@@ -1,0 +1,36 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+  "plugin.name": "pgoutput",
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "localarena",
+  "database.password": "${env:POSTGRES_PASSWORD}",
+  "database.dbname": "localarena",
+  "topic.prefix": "localarena",
+  "slot.name": "debezium_outbox",
+  "publication.name": "debezium_outbox",
+  "publication.autocreate.mode": "filtered",
+  "table.include.list": "public.outbox",
+  "snapshot.mode": "no_data",
+
+  "heartbeat.interval.ms": "10000",
+  "heartbeat.action.query": "UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1",
+  "topic.creation.default.replication.factor": "3",
+  "topic.creation.default.partitions": "1",
+
+  "transforms": "outbox",
+  "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+  "transforms.outbox.route.topic.replacement": "game.economy-events.v1",
+  "transforms.outbox.table.field.event.key": "aggregateid",
+  "transforms.outbox.table.field.event.payload": "envelope",
+  "transforms.outbox.table.fields.additional.placement": "id:header:event_id,type:header:event_type",
+
+  "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+  "value.converter": "io.debezium.converters.BinaryDataConverter",
+  "value.converter.delegate.converter.type": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.delegate.converter.type.schemas.enable": "false",
+
+  "producer.override.acks": "all",
+  "producer.override.enable.idempotence": "true"
+}
