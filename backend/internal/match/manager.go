@@ -74,7 +74,7 @@ func (mg *Manager) Join() (*Match, *Client, error) {
 	if s == nil {
 		mg.nextM++
 		ctx, cancel := context.WithCancel(mg.ctx)
-		m := newMatch(fmt.Sprintf("m-%d", mg.nextM), mg.opts.TickHz, engine.DefaultConfig(mg.opts.Seed+uint64(mg.nextM)))
+		m := newMatch(fmt.Sprintf("m-%d", mg.nextM), mg.opts.TickHz, engine.DefaultConfig(mg.opts.Seed+uint64(mg.nextM))) // #nosec G115 -- nextM is a positive counter
 		s = &slot{m: m, cancel: cancel}
 		mg.matches = append(mg.matches, s)
 		mg.wg.Go(func() { m.run(ctx) })

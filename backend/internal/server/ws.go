@@ -151,7 +151,7 @@ func (ss *session) writePump() {
 			// a throttled client can only ever report old ticks, so comparing to
 			// the current tick would keep it throttled forever.
 			seen := ss.seenTick.Load()
-			lagging := seen > 0 && sentTick > seen+uint64(maxLagSeconds*ss.m.TickHz)
+			lagging := seen > 0 && sentTick > seen+uint64(maxLagSeconds*ss.m.TickHz) // #nosec G115 -- positive constant times positive tick rate
 			if lagging && time.Since(lastWrite) < laggingInterval {
 				telemetry.SnapshotLagged.Inc()
 				continue

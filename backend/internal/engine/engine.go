@@ -173,11 +173,11 @@ func (w *World) Hash() uint64 {
 	for _, id := range w.order {
 		p := w.players[id]
 		put(uint64(p.ID))
-		put(uint64(uint32(p.Pos.X))<<32 | uint64(uint32(p.Pos.Y)))
+		put(uint64(uint32(p.Pos.X))<<32 | uint64(uint32(p.Pos.Y))) // #nosec G115 -- bit reinterpretation of int32 coordinates for hashing
 		put(uint64(p.Score))
 	}
 	for _, it := range w.items {
-		put(uint64(uint32(it.Pos.X))<<32 | uint64(uint32(it.Pos.Y)))
+		put(uint64(uint32(it.Pos.X))<<32 | uint64(uint32(it.Pos.Y))) // #nosec G115 -- bit reinterpretation of int32 coordinates for hashing
 	}
 	return h.Sum64()
 }

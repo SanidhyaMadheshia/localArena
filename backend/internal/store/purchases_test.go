@@ -153,3 +153,36 @@ func TestPurchaseIdempotency(t *testing.T) {
 		t.Fatalf("second purchase of owned item: %v", err)
 	}
 }
+
+// A timed-out client retries POST /v1/players with the same key: one player.
+func TestCreatePlayerIdempotency(t *testing.T) {
+	ctx := ctxT(t)
+	name := fmt.Sprintf("idem_%d", uniq.Add(1))
+	ids := make([]int64, 10)
+	replays := make([]bool, 10)
+	errs := run(10, func(i int) (err error) {
+		ids[i], replays[i], err = st.CreatePlayerIdempotent(ctx, "create-"+name, name, 1000)
+		return err
+	})
+	if got := tally(errs); got["ok"] != 10 {
+		t.Fatalf("results = %v", got)
+	}
+	fresh := 0
+	for i := range ids {
+		if ids[i] != ids[0] {
+			t.Fatalf("different ids %v", ids)
+		}
+		if !replays[i] {
+			fresh++
+		}
+	}
+	if fresh != 1 {
+		t.Fatalf("%d fresh creates, want 1", fresh)
+	}
+	if _, _, err := st.CreatePlayerIdempotent(ctx, "create-"+name, name+"x", 1000); !errors.Is(err, store.ErrIdempotencyMismatch) {
+		t.Fatalf("key reuse with another username: %v", err)
+	}
+	if _, _, err := st.CreatePlayerIdempotent(ctx, "", name, 1000); !errors.Is(err, store.ErrUsernameTaken) {
+		t.Fatalf("no key, existing username: %v", err)
+	}
+}

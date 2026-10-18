@@ -60,6 +60,9 @@ k8s-up:
 k8s-status:
 	kubectl -n localarena get cluster,pooler,pods,svc
 
+# gosec 2.29.0 as released bundles an x/tools that cannot read Go 1.27 export
+# data ("export data version 5"), so it silently skips type-aware rules. It is
+# rebuilt locally against golang.org/x/tools v0.52.0.
 lint:
 	cd $(BACKEND) && gofmt -l . | (! grep .) && golangci-lint run ./... && gosec -quiet -exclude-generated -exclude=G404 ./...  # G404: seeded math/rand is required for deterministic replay (adr/0001)
 

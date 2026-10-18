@@ -181,7 +181,7 @@ func session(ctx context.Context, c config, slow bool, life time.Duration, measu
 		t := time.NewTicker(time.Second / time.Duration(c.inputHz))
 		defer t.Stop()
 		var seq uint32
-		dx, dy := int8(rand.IntN(3)-1), int8(rand.IntN(3)-1)
+		dx, dy := int8(rand.IntN(3)-1), int8(rand.IntN(3)-1) // #nosec G115 -- rand.IntN(3)-1 is in [-1,1]
 		for {
 			select {
 			case <-sctx.Done():
@@ -190,7 +190,7 @@ func session(ctx context.Context, c config, slow bool, life time.Duration, measu
 			}
 			seq++
 			if rand.IntN(10) == 0 {
-				dx, dy = int8(rand.IntN(3)-1), int8(rand.IntN(3)-1)
+				dx, dy = int8(rand.IntN(3)-1), int8(rand.IntN(3)-1) // #nosec G115 -- rand.IntN(3)-1 is in [-1,1]
 			}
 			if c.loss > 0 && rand.Float64() < c.loss {
 				continue // simulated lost input; seq gap is visible to the server

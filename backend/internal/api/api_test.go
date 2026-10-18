@@ -73,6 +73,11 @@ func TestAPIPurchaseFlow(t *testing.T) {
 	if code, _, _ = do("POST", "/v1/players", `{"username":"alice"}`, nil); code != 409 {
 		t.Fatalf("duplicate username: %d", code)
 	}
+	ik := map[string]string{"Idempotency-Key": "create-bob"}
+	_, m1, _ := do("POST", "/v1/players", `{"username":"bob"}`, ik)
+	if code, m2, _ := do("POST", "/v1/players", `{"username":"bob"}`, ik); code != 200 || m1["id"] != m2["id"] {
+		t.Fatalf("retried create: %d %v vs %v", code, m2, m1)
+	}
 	body := fmt.Sprintf(`{"player_id":%d,"cosmetic_id":3}`, id) // skin-legend: price 900, stock 1
 	if code, _, _ = do("POST", "/v1/purchases", body, nil); code != 400 {
 		t.Fatalf("missing Idempotency-Key: %d", code)

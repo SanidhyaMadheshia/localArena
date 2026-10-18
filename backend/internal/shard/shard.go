@@ -47,7 +47,7 @@ type Router struct{ shards []*pgxpool.Pool }
 func New(shards ...*pgxpool.Pool) *Router { return &Router{shards: shards} }
 
 // ShardOf returns the shard index for a player.
-func (r *Router) ShardOf(playerID int64) int { return Jump(mix(uint64(playerID)), len(r.shards)) }
+func (r *Router) ShardOf(playerID int64) int { return Jump(mix(uint64(playerID)), len(r.shards)) } // #nosec G115 -- bit reinterpretation for hashing; sign is irrelevant
 
 // For returns the pool owning playerID.
 func (r *Router) For(playerID int64) *pgxpool.Pool { return r.shards[r.ShardOf(playerID)] }

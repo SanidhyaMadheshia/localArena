@@ -21,13 +21,22 @@ func (s *Server) createPlayer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username must be 3-32 characters"})
 		return
 	}
-	id, err := s.st.CreatePlayer(r.Context(), req.Username, startingCredits)
+	key := r.Header.Get("Idempotency-Key") // optional; makes client retries safe
+	if len(key) > 64 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Idempotency-Key must be at most 64 chars"})
+		return
+	}
+	id, replayed, err := s.st.CreatePlayerIdempotent(r.Context(), key, req.Username, startingCredits)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	s.stampLSN(w, r)
-	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
+	code := http.StatusCreated
+	if replayed {
+		code = http.StatusOK
+	}
+	writeJSON(w, code, map[string]int64{"id": id})
 }
 
 // getProfile reads from the replica unless the client's last write is newer.

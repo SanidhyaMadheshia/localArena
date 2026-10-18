@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"time"
 
@@ -22,18 +23,53 @@ type Profile struct {
 
 // CreatePlayer creates a player and profile with starting credits.
 func (s *Store) CreatePlayer(ctx context.Context, username string, credits int64) (int64, error) {
-	var id int64
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	id, _, err := s.CreatePlayerIdempotent(ctx, "", username, credits)
+	return id, err
+}
+
+// CreatePlayerIdempotent is CreatePlayer with an optional idempotency key.
+// The key is claimed in the same transaction that creates the player, so a
+// retry (same key, same username) returns the original ID with replayed=true;
+// the same key with a different username is ErrIdempotencyMismatch.
+func (s *Store) CreatePlayerIdempotent(ctx context.Context, key, username string, credits int64) (id int64, replayed bool, err error) {
+	hash := sha256.Sum256([]byte(username))
+	err = s.inTx(ctx, func(tx pgx.Tx) error {
+		replayed = false
+		if key != "" {
+			tag, err := tx.Exec(ctx, `INSERT INTO idempotency_keys (scope, key, request_hash) VALUES ('create_player', $1, $2)
+				ON CONFLICT (scope, key) DO NOTHING`, key, hash[:])
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 { // key already used: replay
+				var stored []byte
+				if err := tx.QueryRow(ctx, `SELECT request_hash, result_id FROM idempotency_keys WHERE scope = 'create_player' AND key = $1`,
+					key).Scan(&stored, &id); err != nil {
+					return err
+				}
+				if string(stored) != string(hash[:]) {
+					return ErrIdempotencyMismatch
+				}
+				replayed = true
+				return nil
+			}
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO players (username) VALUES ($1) RETURNING id`, username).Scan(&id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO profiles (player_id, display_name, credits) VALUES ($1, $2, $3)`, id, username, credits)
-		return err
+		if _, err := tx.Exec(ctx, `INSERT INTO profiles (player_id, display_name, credits) VALUES ($1, $2, $3)`, id, username, credits); err != nil {
+			return err
+		}
+		if key != "" {
+			_, err := tx.Exec(ctx, `UPDATE idempotency_keys SET result_id = $2 WHERE scope = 'create_player' AND key = $1`, key, id)
+			return err
+		}
+		return nil
 	})
 	if pgCode(err) == codeUniqueViolation {
-		return 0, ErrUsernameTaken
+		return 0, false, ErrUsernameTaken
 	}
-	return id, err
+	return id, replayed, err
 }
 
 // Profile reads a profile from q (primary or replica pool).
