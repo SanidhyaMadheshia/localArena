@@ -19,6 +19,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/authz"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/cache"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/ratelimit"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
@@ -39,10 +41,23 @@ type Options struct {
 	ProfileTTL time.Duration
 	// ProfileLoadDelay adds latency to profile cache fills (experiments only).
 	ProfileLoadDelay time.Duration
-	TrustProxy       bool // take the client IP from X-Forwarded-For (set by Envoy)
-	PurchaseRL       ratelimit.Rule
-	CreateRL         ratelimit.Rule
-	PresenceTTL      time.Duration
+
+	// Week 5 security. When Auth is set, /v2 (authenticated) is served.
+	Auth    *auth.Verifier
+	Authz   *authz.Client
+	Tickets *auth.Tickets
+	// LegacyV1 keeps the unauthenticated /v1 routes (trusting player_id in
+	// requests) for old clients and experiments. Off in secure deployments.
+	LegacyV1 bool
+	// WebhookSecrets verify signed match-result webhooks (current first; the
+	// previous one during rotation). Empty disables the endpoint.
+	WebhookSecrets [][]byte
+	// AvatarFetch overrides the SSRF-safe HTTP client (tests only).
+	AvatarFetch *http.Client
+	TrustProxy  bool // take the client IP from X-Forwarded-For (set by Envoy)
+	PurchaseRL  ratelimit.Rule
+	CreateRL    ratelimit.Rule
+	PresenceTTL time.Duration
 }
 
 // Server holds dependencies.
@@ -85,6 +100,22 @@ func (s *Server) Drain() { s.draining.Store(true) }
 // Handler returns the router.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if s.opts.Auth != nil {
+		s.registerV2(mux)
+	}
+	if s.opts.Auth == nil || s.opts.LegacyV1 {
+		s.registerV1(mux)
+	}
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /readyz", s.ready)
+	mux.Handle("GET /metrics", promhttp.Handler())
+	return securityHeaders(withTimeout(mux))
+}
+
+// registerV1 serves the original API. With auth enabled it is deprecated:
+// responses carry Deprecation/Sunset headers (RFC 9745 / RFC 8594) pointing to /v2.
+func (s *Server) registerV1(outer *http.ServeMux) {
+	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/players", s.createPlayer)
 	mux.HandleFunc("GET /v1/players/{id}", s.getProfile)
 	mux.HandleFunc("GET /v1/players/{id}/matches", s.getHistory)
@@ -97,10 +128,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/lobbies/{id}", s.getLobby)
 	mux.HandleFunc("PUT /v1/players/{id}/presence", s.heartbeat)
 	mux.HandleFunc("GET /v1/presence", s.presence)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
-	mux.HandleFunc("GET /readyz", s.ready)
-	mux.Handle("GET /metrics", promhttp.Handler())
-	return withTimeout(mux)
+	var h http.Handler = mux
+	if s.opts.Auth != nil {
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Deprecation", "@1792281600") // 2026-10-18
+			w.Header().Set("Sunset", "Sun, 31 Jan 2027 00:00:00 GMT")
+			w.Header().Set("Link", `</v2/>; rel="successor-version"`)
+			mux.ServeHTTP(w, r)
+		})
+	}
+	outer.Handle("/v1/", h)
 }
 
 // withTimeout bounds every request's database work; pool waits included.
@@ -150,6 +187,11 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusConflict
 	case errors.Is(err, store.ErrInsufficientCredits):
 		status = http.StatusPaymentRequired
+	case errors.Is(err, authz.ErrForbidden), errors.Is(err, store.ErrBanned):
+		status = http.StatusForbidden
+	case errors.Is(err, authz.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+		w.Header().Set("Retry-After", "1")
 	case errors.Is(err, store.ErrIdempotencyMismatch):
 		status = http.StatusUnprocessableEntity
 	case errors.Is(err, store.ErrConflict), errors.Is(err, context.DeadlineExceeded), store.IsUnavailable(err):

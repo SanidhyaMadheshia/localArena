@@ -21,3 +21,6 @@ config/*.dec.*
 .vscode/
 .DS_Store
 web/assets/replay-sample.bin
+.secrets.env
+config/*.dec.yaml
+infra/compose/tls/*.key

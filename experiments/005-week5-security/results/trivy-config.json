@@ -1,0 +1,107 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.76.0"
+  },
+  "ReportID": "01a1501b-3cc4-750b-932f-8c21b97d9c8e",
+  "CreatedAt": "2026-10-18T23:12:04.740332081+05:30",
+  "ArtifactID": "sha256:e4a7d463b76a3aa494f992ac5630034b31f09ae40f94fae810378e14105900b1",
+  "ArtifactName": ".",
+  "ArtifactType": "repository",
+  "Metadata": {
+    "RepoURL": "https://github.com/SanidhyaMadheshia/localArena.git",
+    "Branch": "main",
+    "Commit": "38bbed50ab43988785996b7e61b3b69f8e9e727c",
+    "CommitMsg": "Week 4: Kafka KRaft, protobuf contracts, outbox CDC, Kafka Streams, reward saga\n\n- 3-broker KRaft Kafka (RF3, minISR 2), Kafka UI, Apicurio, Debezium Connect (streaming profile)\n- Explicit topic design (scripts/kafka-topics.sh); protobuf Envelope contracts with\n  BACKWARD_TRANSITIVE checks (scripts/register-schemas.sh)\n- Non-blocking franz-go publisher with durable disk spool and replay; match events\n  with deterministic IDs and rounds; account player IDs on /ws\n- Transactional outbox (protobuf envelope) published by Debezium EventRouter\n- Java Kafka Streams: idempotent leaderboard, session windows, EOS v2, IQ HTTP, DLQ\n- Go reward saga: reserve/grant/compensate, retry topic, DLQ\n- eventcat debug/replay tool; Experiment 004; ADRs 0009-0012",
+    "Author": "SanidhyaMadheshia \u003csanidhyamadheshia@gmail.com\u003e",
+    "Committer": "SanidhyaMadheshia \u003csanidhyamadheshia@gmail.com\u003e"
+  },
+  "Results": [
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 19,
+        "Failures": 1
+      },
+      "Misconfigurations": [
+        {
+          "Type": "Dockerfile Security Check",
+          "ID": "DS-0002",
+          "Title": "Image user should not be 'root'",
+          "Description": "Running containers with 'root' user can lead to a container escape situation. It is a best practice to run containers as non-root users, which can be done by adding a 'USER' statement to the Dockerfile.",
+          "Message": "Specify at least 1 USER command in Dockerfile with non-root user as argument",
+          "Namespace": "builtin.dockerfile.DS002",
+          "Query": "data.builtin.dockerfile.DS002.deny",
+          "Resolution": "Add 'USER \u003cnon root user name\u003e' line to the Dockerfile",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ds-0002",
+          "References": [
+            "https://docs.docker.com/develop/develop-images/dockerfile_best-practices/",
+            "https://avd.aquasec.com/misconfig/ds-0002"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Dockerfile",
+            "Service": "general"
+          }
+        }
+      ]
+    },
+    {
+      "Target": "infra/kubernetes/00-namespace.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 23,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "infra/kubernetes/10-postgres.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 23,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "infra/kubernetes/15-valkey.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 23,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "infra/kubernetes/20-migrate-job.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 23,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "infra/kubernetes/30-api.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 23,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "streams/Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 20,
+        "Failures": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://flagd.dev/schema/v0/flags.json",
+  "flags": {
+    "game-mode": {
+      "state": "ENABLED",
+      "variants": { "classic": "classic", "frenzy": "frenzy" },
+      "defaultVariant": "classic",
+      "targeting": {
+        "fractional": [
+          { "cat": [{ "var": "$flagd.flagKey" }, { "var": "targetingKey" }] },
+          ["frenzy", 20],
+          ["classic", 80]
+        ]
+      }
+    }
+  }
+}

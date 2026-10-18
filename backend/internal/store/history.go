@@ -25,8 +25,26 @@ type MatchSummary struct {
 
 // RecordMatch stores a finished match and its scores in one transaction.
 func (s *Store) RecordMatch(ctx context.Context, started, ended time.Time, scores []MatchPlayer) (int64, error) {
-	var id int64
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	id, _, err := s.RecordMatchOnce(ctx, "", "", started, ended, scores)
+	return id, err
+}
+
+// RecordMatchOnce records a match and, when delivery is set, claims that
+// webhook delivery id in the same transaction: a replayed delivery records
+// nothing and returns replayed=true (adr/0015).
+func (s *Store) RecordMatchOnce(ctx context.Context, delivery, source string, started, ended time.Time, scores []MatchPlayer) (id int64, replayed bool, err error) {
+	err = s.inTx(ctx, func(tx pgx.Tx) error {
+		replayed = false
+		if delivery != "" {
+			tag, err := tx.Exec(ctx, `INSERT INTO webhook_deliveries (delivery_id, source) VALUES ($1, $2) ON CONFLICT DO NOTHING`, delivery, source)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() == 0 {
+				replayed = true
+				return nil
+			}
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO matches (started_at, ended_at) VALUES ($1, $2) RETURNING id`,
 			started, ended).Scan(&id); err != nil {
 			return err
@@ -39,7 +57,7 @@ func (s *Store) RecordMatch(ctx context.Context, started, ended time.Time, score
 			[]string{"match_id", "started_at", "player_id", "score"}, pgx.CopyFromRows(rows))
 		return err
 	})
-	return id, err
+	return id, replayed, err
 }
 
 // HistoryNPlusOne is the deliberately naive version: 1 query for the list,

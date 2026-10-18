@@ -6,6 +6,7 @@ package match
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -68,6 +69,8 @@ type Match struct {
 
 	cfg        engine.Config
 	roundTicks uint64 // 0 = endless
+	modeFor    func(string) string
+	mode       atomic.Value // string: current round's game mode (for status/welcome)
 	ev         emitter
 }
 
@@ -123,7 +126,7 @@ func (m *Match) run(ctx context.Context) {
 		last    = time.Now()
 		round   = 0
 	)
-	m.ev.startRound(round, m.cfg.Seed)
+	m.newRound(round, nil)
 	for {
 		select {
 		case <-ctx.Done():
@@ -165,13 +168,7 @@ func (m *Match) run(ctx context.Context) {
 				// Round over: publish the result, then a fresh world with the same players.
 				m.ev.completed(players, m.world.Tick())
 				round++
-				cfg := m.cfg
-				cfg.Seed += uint64(round) // #nosec G115 -- round is a small positive counter
-				m.world = engine.New(cfg)
-				for id := range clients {
-					m.world.AddPlayer(id)
-				}
-				m.ev.startRound(round, cfg.Seed)
+				m.newRound(round, clients)
 			}
 			d := time.Since(start)
 			telemetry.Ticks.Inc()
@@ -212,4 +209,37 @@ func (m *Match) broadcast(clients map[engine.PlayerID]*Client, acks map[engine.P
 		c.offer(b)
 	}
 	return players, items
+}
+
+// ApplyMode adjusts world rules for a game mode. Unknown modes are classic.
+func ApplyMode(cfg engine.Config, mode string) engine.Config {
+	if mode == "frenzy" { // more items, faster players
+		cfg.Items, cfg.Speed = 30, 14
+	}
+	return cfg
+}
+
+// Mode returns the current round's game mode.
+func (m *Match) Mode() string {
+	if v, ok := m.mode.Load().(string); ok {
+		return v
+	}
+	return "classic"
+}
+
+// newRound builds a fresh world for the round with the flagged mode and the
+// current players, then announces it. Runs on the match goroutine.
+func (m *Match) newRound(round int, clients map[engine.PlayerID]*Client) {
+	mode := "classic"
+	if m.modeFor != nil {
+		mode = m.modeFor(fmt.Sprintf("%s/r%d", m.ID, round))
+	}
+	m.mode.Store(mode)
+	cfg := ApplyMode(m.cfg, mode)
+	cfg.Seed += uint64(round) // #nosec G115 -- round is a small positive counter
+	m.world = engine.New(cfg)
+	for id := range clients {
+		m.world.AddPlayer(id)
+	}
+	m.ev.startRound(round, cfg.Seed)
 }

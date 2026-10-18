@@ -19,6 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 # Distroless static: no shell, no package manager, runs as uid 65532.
 FROM gcr.io/distroless/static-debian12:nonroot AS gameserver
+USER 65532:65532
 COPY --from=build /out/gameserver /gameserver
 # Spool directory owned by the nonroot user (uid 65532); a named volume inherits it.
 COPY --from=build --chown=65532:65532 /out/empty /var/lib/gameserver/spool
@@ -29,11 +30,13 @@ EXPOSE 8080
 ENTRYPOINT ["/gameserver"]
 
 FROM gcr.io/distroless/static-debian12:nonroot AS bots
+USER 65532:65532
 COPY --from=build /out/bots /bots
 ENTRYPOINT ["/bots"]
 
 # API image also carries the migrate binary (used by the Compose "migrate" service and the k8s Job).
 FROM gcr.io/distroless/static-debian12:nonroot AS api
+USER 65532:65532
 COPY --from=build /out/api /api
 COPY --from=build /out/migrate /migrate
 COPY --from=build /out/rewards /rewards

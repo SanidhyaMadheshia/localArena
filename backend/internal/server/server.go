@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
 )
 
@@ -18,6 +19,11 @@ import (
 type Config struct {
 	WebDir         string   // static client directory; empty disables
 	AllowedOrigins []string // extra Origin hosts allowed for WebSocket (e.g. "localhost:5173")
+	// Tickets, when set, makes /ws require ?ticket= (minted by the API's
+	// POST /v2/game-tickets) and ignores ?player=. Guests are refused.
+	Tickets *auth.Tickets
+	// AllowGuests keeps anonymous sessions when Tickets is set (bots/experiments).
+	AllowGuests bool
 }
 
 // Server holds HTTP handlers.

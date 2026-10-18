@@ -139,3 +139,32 @@ func TestCloseReleasesClients(t *testing.T) {
 		t.Fatalf("join after close: %v", err)
 	}
 }
+
+func TestModeFlagPerRound(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	mg := NewManager(Options{TickHz: 200, RoundTicks: 10, ModeFor: func(round string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, round)
+		if len(seen)%2 == 0 {
+			return "frenzy"
+		}
+		return "classic"
+	}})
+	defer mg.Close()
+	m, c, _ := mg.Join()
+	if m.Mode() != "classic" {
+		t.Fatalf("round 0: mode %s", m.Mode())
+	}
+	time.Sleep(80 * time.Millisecond) // ~1.6 rounds at 200 Hz
+	mg.Leave(m, c)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) < 2 || seen[0] != "m-1/r0" || seen[1] != "m-1/r1" {
+		t.Fatalf("flag evaluated with %v", seen)
+	}
+	if ApplyMode(m.cfg, "frenzy").Items != 30 || ApplyMode(m.cfg, "unknown").Items != 10 {
+		t.Fatal("ApplyMode")
+	}
+}

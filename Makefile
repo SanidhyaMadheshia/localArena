@@ -18,10 +18,12 @@ TEST_ENV := LOCALARENA_TEST_DATABASE_URL=$(PG)@localhost:5432/localarena \
 	LOCALARENA_TEST_REPLICA_URL=$(PG)@localhost:5433/localarena \
 	LOCALARENA_TEST_PGBOUNCER_URL=$(PG)@localhost:6432/localarena \
 	LOCALARENA_TEST_VALKEY_ADDR=localhost:6380 \
+	LOCALARENA_TEST_OPA_URL=http://localhost:8181 \
+	LOCALARENA_TEST_FLAGD_URL=http://localhost:8016 \
 	LOCALARENA_TEST_SHARD_URLS=$(PG)@localhost:5440/localarena,$(PG)@localhost:5441/localarena
 
 db-up:
-	docker compose --profile shards up -d --wait postgres postgres-replica pgbouncer valkey pg-shard0 pg-shard1
+	docker compose --profile shards --profile security up -d --wait postgres postgres-replica pgbouncer valkey pg-shard0 pg-shard1 opa flagd
 
 itest:
 	cd $(BACKEND) && $(TEST_ENV) go test -count=1 -p 1 ./...
@@ -120,3 +122,20 @@ streams-test:
 
 experiment-004:
 	experiments/004-week4-streaming/run.sh
+
+# ---- Week 5 security ----
+.PHONY: secrets certs sec-up opa-test experiment-005 scan
+secrets:
+	scripts/secrets-env.sh
+certs:
+	scripts/tls-certs.sh
+sec-up: secrets certs
+	docker compose --profile security up -d keycloak opa flagd api gameserver envoy
+opa-test:
+	docker run --rm -v $(CURDIR)/policies:/p:ro openpolicyagent/opa:1.21.2-static test /p -v
+experiment-005:
+	experiments/005-week5-security/e2e.sh
+scan:
+	trivy image --severity HIGH,CRITICAL localarena/api:dev localarena/gameserver:dev localarena/streams:dev
+	trivy config --severity HIGH,CRITICAL --skip-dirs experiments .
+	cd $(BACKEND) && gosec -quiet -exclude-generated -exclude=G404 ./...

@@ -18,7 +18,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/events"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/flags"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/server"
 )
@@ -36,6 +38,7 @@ func main() {
 		brokers   = flag.String("kafka", env("KAFKA_BROKERS", ""), "comma-separated Kafka brokers; empty disables events")
 		spoolDir  = flag.String("spool-dir", env("EVENT_SPOOL_DIR", ""), "durable event spool directory (used while Kafka is unavailable)")
 		roundSecs = flag.Int("round-seconds", 120, "match round length; each round ends with MatchCompleted")
+		guests    = flag.Bool("allow-guests", env("ALLOW_GUESTS", "") == "1", "with GAME_TICKET_SECRET set, still accept anonymous guests")
 	)
 	flag.Parse()
 
@@ -57,11 +60,26 @@ func main() {
 		}
 		log.Info("publishing events", "brokers", *brokers, "spool", *spoolDir)
 	}
-	mgr := match.NewManager(match.Options{TickHz: *tickHz, Capacity: *capacity, Seed: *seed,
+	var tickets *auth.Tickets
+	if sec := os.Getenv("GAME_TICKET_SECRET"); sec != "" {
+		var err error
+		if tickets, err = auth.NewTickets([]byte(sec)); err != nil {
+			log.Error("tickets", "err", err)
+			os.Exit(1)
+		}
+		log.Info("game tickets required", "allow_guests", *guests)
+	}
+	fl := flags.New(env("FLAGD_URL", ""))
+	modeFor := func(round string) string {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond) // bounded stall at round start only
+		defer cancel()
+		return fl.String(ctx, "game-mode", round, "classic")
+	}
+	mgr := match.NewManager(match.Options{ModeFor: modeFor, TickHz: *tickHz, Capacity: *capacity, Seed: *seed,
 		Events: pub, RoundTicks: uint64(max(*roundSecs, 0) * *tickHz)}) // #nosec G115 -- clamped non-negative
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.New(mgr, log, server.Config{WebDir: *webDir, AllowedOrigins: split(*origins)}).Handler(),
+		Handler:           server.New(mgr, log, server.Config{WebDir: *webDir, AllowedOrigins: split(*origins), Tickets: tickets, AllowGuests: *guests}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		// Request contexts derive from ctx so long polls and SSE streams end on shutdown.

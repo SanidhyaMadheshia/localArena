@@ -9,6 +9,10 @@
 //	DRAIN_SECONDS how long /readyz fails before shutdown (default 5)
 //	PROFILE_TTL   profile cache TTL (Go duration, default 30s; experiments use 1s)
 //	PROFILE_LOAD_DELAY  experiments only: extra latency added to each profile cache fill
+//	OIDC_ISSUER, OIDC_JWKS_URL  enable /v2 (token auth); JWKS URL defaults to the issuer's certs endpoint
+//	OPA_URL             policy engine for /v2 (required with OIDC; v2 fails closed without it)
+//	GAME_TICKET_SECRET  >= 32 bytes, shared with the gameserver (from SOPS)
+//	LEGACY_V1           "1" keeps the unauthenticated /v1 routes alongside /v2
 package main
 
 import (
@@ -26,6 +30,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/api"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/authz"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/cache"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
@@ -73,8 +79,31 @@ func run(log *slog.Logger) error {
 	defer c.Close()
 	ttl, _ := time.ParseDuration(os.Getenv("PROFILE_TTL")) // 0 -> default
 	delay, _ := time.ParseDuration(os.Getenv("PROFILE_LOAD_DELAY"))
-	apiSrv := api.New(store.New(primary, replica), log, api.Options{Cache: c, ProfileTTL: ttl, ProfileLoadDelay: delay,
-		TrustProxy: os.Getenv("TRUST_PROXY") == "1"})
+	opts := api.Options{Cache: c, ProfileTTL: ttl, ProfileLoadDelay: delay, TrustProxy: os.Getenv("TRUST_PROXY") == "1",
+		LegacyV1: os.Getenv("LEGACY_V1") == "1"}
+	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
+		jwks := os.Getenv("OIDC_JWKS_URL")
+		if jwks == "" {
+			jwks = iss + "/protocol/openid-connect/certs"
+		}
+		opts.Auth = auth.NewVerifier(ctx, iss, jwks, "localarena-api")
+		if u := os.Getenv("OPA_URL"); u != "" {
+			opts.Authz = authz.New(u)
+		}
+		if sec := os.Getenv("GAME_TICKET_SECRET"); sec != "" {
+			if opts.Tickets, err = auth.NewTickets([]byte(sec)); err != nil {
+				return err
+			}
+		}
+		if sec := os.Getenv("WEBHOOK_SIGNING_SECRET"); sec != "" {
+			opts.WebhookSecrets = append(opts.WebhookSecrets, []byte(sec))
+			if prev := os.Getenv("WEBHOOK_SIGNING_SECRET_PREVIOUS"); prev != "" {
+				opts.WebhookSecrets = append(opts.WebhookSecrets, []byte(prev))
+			}
+		}
+		log.Info("v2 auth enabled", "issuer", iss, "opa", opts.Authz != nil, "legacy_v1", opts.LegacyV1)
+	}
+	apiSrv := api.New(store.New(primary, replica), log, opts)
 	drain := 5 * time.Second
 	if v, err := strconv.Atoi(os.Getenv("DRAIN_SECONDS")); err == nil && v >= 0 {
 		drain = time.Duration(v) * time.Second

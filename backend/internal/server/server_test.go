@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"go.uber.org/goleak"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/protocol"
 )
@@ -253,5 +254,28 @@ func TestLaggingClientIsThrottled(t *testing.T) {
 	count(1200 * time.Millisecond)
 	if n := count(500 * time.Millisecond); n < 15 {
 		t.Fatalf("recovered client got %d snapshots in 0.5 s, want ~25", n)
+	}
+}
+
+func TestWebSocketTickets(t *testing.T) {
+	mgr := match.NewManager(match.Options{TickHz: 50})
+	tk, _ := auth.NewTickets([]byte("0123456789abcdef0123456789abcdef"))
+	ts := httptest.NewServer(New(mgr, slog.New(slog.DiscardHandler), Config{Tickets: tk}).Handler())
+	t.Cleanup(func() { mgr.Close(); ts.CloseClientConnections(); ts.Close() })
+	base := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	for name, q := range map[string]string{"none": "", "forged": "?ticket=AAAA", "player param": "?player=5"} {
+		_, resp, err := websocket.DefaultDialer.Dial(base+q, nil)
+		if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s: want 401, got %v", name, err)
+		}
+	}
+	c, _, err := websocket.DefaultDialer.Dial(base+"?ticket="+tk.Issue(77, time.Now()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	var w protocol.Welcome
+	if err := c.ReadJSON(&w); err != nil || w.ID != 77 {
+		t.Fatalf("welcome %+v %v", w, err)
 	}
 }

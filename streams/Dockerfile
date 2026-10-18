@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/home/gradle/.gradle gradle installDist --no-daemo
 
 # glibc base: RocksDB's JNI library needs libstdc++ (Alpine/musl fails with UnsatisfiedLinkError).
 FROM eclipse-temurin:21-jre
-RUN useradd -u 10001 -r -m streams && mkdir -p /var/lib/streams && chown streams /var/lib/streams
+# pebble (Ubuntu's service manager, a Go binary) is not used and carried stdlib CVEs (Experiment 005).
+RUN rm -f /usr/bin/pebble && useradd -u 10001 -r -m streams && mkdir -p /var/lib/streams && chown streams /var/lib/streams
 COPY --from=build /src/streams/build/install/localarena-streams /app
 USER streams
 ENV STATE_DIR=/var/lib/streams JAVA_OPTS="-Xmx256m -XX:+ExitOnOutOfMemoryError"

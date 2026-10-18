@@ -51,6 +51,9 @@ services:
       # Events are optional: unreachable brokers only mean spooling (adr/0009).
       KAFKA_BROKERS: ${GAMESERVER_KAFKA:-kafka-1:19092,kafka-2:19092,kafka-3:19092}
       EVENT_SPOOL_DIR: /var/lib/gameserver/spool
+      ALLOW_GUESTS: ${ALLOW_GUESTS:-1} # bots play as guests; set 0 to require game tickets
+      FLAGD_URL: http://flagd:8016
+    env_file: [{ path: .secrets.env, required: false }]
     command: ["-tick-hz", "20", "-capacity", "20", "-round-seconds", "${ROUND_SECONDS:-120}"]
     volumes: ["gameserver-spool:/var/lib/gameserver"]
     deploy:
@@ -131,6 +134,13 @@ services:
       PROFILE_LOAD_DELAY: ${PROFILE_LOAD_DELAY:-0s} # experiments only: simulate an expensive cache fill
       TRUST_PROXY: "1"
       DRAIN_SECONDS: "5"
+      # Week 5 auth (adr/0013). Issuer = the URL in tokens (browser-facing);
+      # JWKS fetched over the internal network. v2 needs the security profile.
+      OIDC_ISSUER: http://localhost:8180/realms/localarena
+      OIDC_JWKS_URL: http://keycloak:8180/realms/localarena/protocol/openid-connect/certs
+      OPA_URL: http://opa:8181
+      LEGACY_V1: ${LEGACY_V1:-1} # unauthenticated /v1 kept for bots/k6 experiments; set 0 for a secure stack
+    env_file: [{ path: .secrets.env, required: false }] # GAME_TICKET_SECRET etc. (scripts/secrets-env.sh)
     depends_on:
       migrate: { condition: service_completed_successfully }
       pgbouncer: { condition: service_started }
@@ -146,8 +156,10 @@ services:
   envoy:
     image: envoyproxy/envoy:v1.40.0
     command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
-    volumes: ["./infra/compose/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro"]
-    ports: ["10000:10000", "10001:10001", "127.0.0.1:9901:9901"]
+    volumes:
+      - ./infra/compose/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./infra/compose/tls:/etc/envoy/tls:ro # scripts/tls-certs.sh
+    ports: ["10000:10000", "10001:10001", "8443:8443", "127.0.0.1:9901:9901"]
     depends_on: [api]
     restart: unless-stopped
 
@@ -336,6 +348,41 @@ services:
       kafka-1: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     deploy: { resources: { limits: { memory: 128M } } }
+    restart: unless-stopped
+
+  # ---- Week 5 "security" profile ----
+  # Keycloak (OIDC). Dev mode with an imported realm; lab-only users/passwords live
+  # in the realm file. Hostname is fixed so tokens carry the same issuer for the
+  # browser (localhost:8180) and for services inside the network (keycloak:8180).
+  keycloak:
+    profiles: ["security"]
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm", "--http-port=8180", "--hostname=http://localhost:8180", "--hostname-backchannel-dynamic=true", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: kcadmin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-kcadmin-dev}
+      JAVA_OPTS_KC_HEAP: -Xmx512m
+    volumes: ["./infra/compose/keycloak/localarena-realm.json:/opt/keycloak/data/import/localarena-realm.json:ro"]
+    ports: ["127.0.0.1:8180:8180"]
+    deploy: { resources: { limits: { memory: 1G } } }
+
+  # Open Policy Agent: authorization decisions (adr/0014). Policies are mounted read-only.
+  opa:
+    profiles: ["security"]
+    image: openpolicyagent/opa:1.21.2-static
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "/policies"]
+    volumes: ["./policies:/policies:ro"]
+    ports: ["127.0.0.1:8181:8181"]
+    deploy: { resources: { limits: { memory: 128M } } }
+
+  # Feature flags (OpenFeature flagd). Edit flags.json: flagd hot-reloads it.
+  # OFREP evaluation API on :8016 (adr/0015).
+  flagd:
+    image: ghcr.io/open-feature/flagd:v0.18.0
+    command: ["start", "--uri", "file:/etc/flagd/flags.json"]
+    volumes: ["./infra/compose/flagd:/etc/flagd:ro"]
+    ports: ["127.0.0.1:8016:8016"]
+    deploy: { resources: { limits: { memory: 64M } } }
     restart: unless-stopped
 
   pg-shard0:

@@ -34,6 +34,10 @@ type Options struct {
 	Events     *events.Publisher // nil disables event publishing
 	RoundTicks uint64            // ticks per round; 0 = endless (tests)
 	InstanceID string            // unique per process start; default random
+
+	// ModeFor returns the game mode for a round (feature flag "game-mode");
+	// nil means always "classic". Called on the match goroutine at round start.
+	ModeFor func(roundID string) string
 }
 
 // Manager assigns players to matches, creating matches on demand and stopping
@@ -112,6 +116,7 @@ func (mg *Manager) Join(account ...engine.PlayerID) (*Match, *Client, error) {
 		ctx, cancel := context.WithCancel(mg.ctx)
 		m := newMatch(fmt.Sprintf("m-%d", mg.nextM), mg.opts.TickHz, engine.DefaultConfig(mg.opts.Seed+uint64(mg.nextM)), // #nosec G115 -- nextM is a positive counter
 			mg.opts.RoundTicks, mg.opts.Events, mg.opts.InstanceID)
+		m.modeFor = mg.opts.ModeFor
 		s = &slot{m: m, cancel: cancel}
 		mg.matches = append(mg.matches, s)
 		mg.wg.Go(func() { m.run(ctx) })

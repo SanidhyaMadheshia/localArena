@@ -1,0 +1,5 @@
+# SOPS creation rules (adr/0013). Only the public age recipient is stored here;
+# the private key lives in ~/.config/sops/age/keys.txt (never committed).
+creation_rules:
+  - path_regex: config/.*\.enc\.ya?ml$
+    age: age1334cfhxgsv2gcu5v6e30ef36g20t6s2d9uj0cx9ky3tx50mmqe8sgjjvcp

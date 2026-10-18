@@ -47,17 +47,30 @@ const (
 )
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
+	// Authenticate before upgrading, so a refused client gets a plain HTTP 401.
+	var account engine.PlayerID
+	switch q := r.URL.Query(); {
+	case s.cfg.Tickets != nil && q.Get("ticket") != "":
+		id, err := s.cfg.Tickets.Verify(q.Get("ticket"), time.Now())
+		if err != nil || id <= 0 || id >= int64(match.GuestIDBase) {
+			http.Error(w, "invalid game ticket", http.StatusUnauthorized)
+			return
+		}
+		account = engine.PlayerID(id) // #nosec G115 -- range checked above
+	case s.cfg.Tickets != nil && !s.cfg.AllowGuests:
+		http.Error(w, "game ticket required", http.StatusUnauthorized)
+		return
+	case s.cfg.Tickets == nil:
+		// Pre-auth mode (weeks 1-4): ?player= is trusted. Lab only.
+		if v, err := strconv.ParseUint(q.Get("player"), 10, 32); err == nil {
+			account = engine.PlayerID(v)
+		}
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return // Upgrade already replied with an HTTP error
 	}
-	// SECURITY: ?player=<account id> is trusted until auth exists (week 5);
-	// without it the session is a guest. One live session per account.
-	var account engine.PlayerID
-	if v, err := strconv.ParseUint(r.URL.Query().Get("player"), 10, 32); err == nil {
-		account = engine.PlayerID(v)
-	}
-	m, c, err := s.mgr.Join(account)
+	m, c, err := s.mgr.Join(account) // one live session per account
 	if errors.Is(err, match.ErrAlreadyPlaying) {
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "already connected"), time.Now().Add(writeWait))
@@ -150,7 +163,7 @@ func (ss *session) writePump() {
 	}()
 	cfg := ss.m.Config()
 	welcome, _ := json.Marshal(protocol.Welcome{T: protocol.TypeWelcome, V: protocol.Version,
-		ID: uint32(ss.c.ID), Match: ss.m.ID, TickHz: ss.m.TickHz, W: cfg.Width, H: cfg.Height})
+		ID: uint32(ss.c.ID), Match: ss.m.ID, TickHz: ss.m.TickHz, W: cfg.Width, H: cfg.Height, Mode: ss.m.Mode()})
 	if ss.write(welcome) != nil {
 		return
 	}

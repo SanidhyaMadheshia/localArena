@@ -72,6 +72,7 @@ type Welcome struct {
 	TickHz int    `json:"tickHz"`
 	W      int32  `json:"w"`
 	H      int32  `json:"h"`
+	Mode   string `json:"mode,omitempty"` // feature-flagged game mode (additive, v1-compatible)
 }
 
 // PlayerState is the public view of one player.
