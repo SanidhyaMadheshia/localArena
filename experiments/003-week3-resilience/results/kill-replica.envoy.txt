@@ -1,0 +1,7 @@
+cluster.api_lr.health_check.failure: 2
+cluster.api_rr.health_check.failure: 2
+cluster.api_rr.outlier_detection.ejections_enforced_total: 1
+cluster.api_rr.upstream_cx_connect_fail: 5
+cluster.api_rr.upstream_rq_2xx: 8703
+cluster.api_rr.upstream_rq_retry: 5
+cluster.api_rr.upstream_rq_retry_success: 5

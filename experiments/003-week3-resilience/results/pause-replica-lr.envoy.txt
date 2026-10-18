@@ -1,0 +1,4 @@
+cluster.api_lr.outlier_detection.ejections_enforced_total: 1
+cluster.api_lr.upstream_rq_per_try_timeout: 81
+cluster.api_lr.upstream_rq_retry: 81
+cluster.api_lr.upstream_rq_retry_success: 81

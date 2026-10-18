@@ -3,6 +3,12 @@
 //	DATABASE_URL  primary (or PgBouncer) DSN, required
 //	REPLICA_URL   read replica DSN, optional
 //	DB_MAX_CONNS  pool size per process (default 10)
+//	VALKEY_ADDR   host:port of Valkey; empty disables caching and global rate limits
+//	CACHE_SINGLEFLIGHT  "0" disables the in-process stampede guard (experiments)
+//	TRUST_PROXY   "1" when behind Envoy: client IP comes from X-Forwarded-For
+//	DRAIN_SECONDS how long /readyz fails before shutdown (default 5)
+//	PROFILE_TTL   profile cache TTL (Go duration, default 30s; experiments use 1s)
+//	PROFILE_LOAD_DELAY  experiments only: extra latency added to each profile cache fill
 package main
 
 import (
@@ -20,6 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/api"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/cache"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
 
@@ -59,16 +66,30 @@ func run(log *slog.Logger) error {
 	}
 	prometheus.MustRegister(store.NewPoolCollector(pools))
 
+	c := cache.New(cache.Options{
+		Addr:         os.Getenv("VALKEY_ADDR"),
+		Singleflight: os.Getenv("CACHE_SINGLEFLIGHT") != "0",
+	}, log)
+	defer c.Close()
+	ttl, _ := time.ParseDuration(os.Getenv("PROFILE_TTL")) // 0 -> default
+	delay, _ := time.ParseDuration(os.Getenv("PROFILE_LOAD_DELAY"))
+	apiSrv := api.New(store.New(primary, replica), log, api.Options{Cache: c, ProfileTTL: ttl, ProfileLoadDelay: delay,
+		TrustProxy: os.Getenv("TRUST_PROXY") == "1"})
+	drain := 5 * time.Second
+	if v, err := strconv.Atoi(os.Getenv("DRAIN_SECONDS")); err == nil && v >= 0 {
+		drain = time.Duration(v) * time.Second
+	}
+
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8081"
 	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(store.New(primary, replica), log).Handler(),
+		Handler:           apiSrv.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      5 * time.Second, // > 3 s request budget, so handlers finish their own error replies
 		IdleTimeout:       60 * time.Second,
 	}
 	errc := make(chan error, 1)
@@ -81,7 +102,15 @@ func run(log *slog.Logger) error {
 		return err
 	case <-ctx.Done():
 	}
+	// Graceful drain: fail readiness first so Envoy health checks (2 s
+	// interval x 2) and Kubernetes endpoints stop routing here, keep serving
+	// in-flight and straggler requests, then stop accepting and wait for the rest.
+	log.Info("draining", "for", drain)
+	apiSrv.Drain()
+	time.Sleep(drain)
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdown)
+	err = srv.Shutdown(shutdown)
+	log.Info("stopped", "err", err)
+	return err
 }

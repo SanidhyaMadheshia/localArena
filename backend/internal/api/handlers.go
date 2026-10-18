@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/cache"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
 
@@ -15,6 +18,9 @@ func (s *Server) createPlayer(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 	}
 	if !decode(w, r, &req) {
+		return
+	}
+	if !s.allow(w, r, "create:ip:"+s.clientIP(r), s.opts.CreateRL) {
 		return
 	}
 	if n := len(req.Username); n < 3 || n > 32 {
@@ -39,19 +45,37 @@ func (s *Server) createPlayer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, map[string]int64{"id": id})
 }
 
-// getProfile reads from the replica unless the client's last write is newer.
+// getProfile is cache-aside over the primary. Fills read the primary so a
+// lagging replica can never be copied into the cache. A client carrying a
+// read-your-writes token bypasses the cache and uses LSN-aware replica routing.
 func (s *Server) getProfile(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	reader, fromReplica := s.st.ReaderFor(r.Context(), r.Header.Get(HeaderReadAfter), 200*time.Millisecond)
-	p, err := s.st.Profile(r.Context(), reader, id)
+	if lsn := r.Header.Get(HeaderReadAfter); lsn != "" {
+		reader, fromReplica := s.st.ReaderFor(r.Context(), lsn, 200*time.Millisecond)
+		p, err := s.st.Profile(r.Context(), reader, id)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		w.Header().Set("X-Served-By", map[bool]string{true: "replica", false: "primary"}[fromReplica])
+		writeJSON(w, http.StatusOK, p)
+		return
+	}
+	p, hit, err := cache.GetOrLoad(r.Context(), s.opts.Cache, profileKey(id), s.opts.ProfileTTL,
+		func(ctx context.Context) (store.Profile, error) {
+			if d := s.opts.ProfileLoadDelay; d > 0 {
+				time.Sleep(d)
+			}
+			return s.st.Profile(ctx, s.st.Primary, id)
+		})
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	w.Header().Set("X-Served-By", map[bool]string{true: "replica", false: "primary"}[fromReplica])
+	w.Header().Set("X-Served-By", map[bool]string{true: "cache", false: "primary"}[hit])
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -121,6 +145,9 @@ func (s *Server) purchase(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if !s.allow(w, r, "purchase:player:"+strconv.FormatInt(req.PlayerID, 10), s.opts.PurchaseRL) {
+		return
+	}
 	strategy := store.Conditional
 	if req.Strategy != "" {
 		var err error
@@ -134,6 +161,7 @@ func (s *Server) purchase(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.invalidate(r, profileKey(req.PlayerID)) // after commit: credits and items changed
 	s.stampLSN(w, r)
 	code := http.StatusCreated
 	if rc.Replayed {
@@ -177,6 +205,7 @@ func (s *Server) joinLobby(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.invalidate(r, lobbyKey(id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -185,9 +214,73 @@ func (s *Server) leaveLobby(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.st.LeaveLobby(r.Context(), id); err != nil {
+	lobby, err := s.st.LeaveLobby(r.Context(), id)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	s.invalidate(r, lobbyKey(lobby))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getLobby(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	l, hit, err := cache.GetOrLoad(r.Context(), s.opts.Cache, lobbyKey(id), 10*time.Second,
+		func(ctx context.Context) (store.Lobby, error) { return s.st.GetLobby(ctx, id) })
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.Header().Set("X-Served-By", map[bool]string{true: "cache", false: "primary"}[hit])
+	writeJSON(w, http.StatusOK, l)
+}
+
+// heartbeat marks a player online for PresenceTTL. Presence is ephemeral and
+// lives only in Valkey; when Valkey is down the API reports 503 for writes and
+// "unknown" for reads instead of pretending.
+func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.opts.Cache.Touch(r.Context(), "presence:"+strconv.FormatInt(id, 10), "1", s.opts.PresenceTTL); err != nil {
+		w.Header().Set("Retry-After", "1")
+		noProxyRetry(w)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "presence temporarily unavailable"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) presence(w http.ResponseWriter, r *http.Request) {
+	raw := strings.Split(r.URL.Query().Get("ids"), ",")
+	if len(raw) == 0 || len(raw) > 100 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ids: 1-100 comma-separated player ids"})
+		return
+	}
+	keys := make([]string, len(raw))
+	for i, v := range raw {
+		id, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id " + v})
+			return
+		}
+		keys[i] = "presence:" + strconv.FormatInt(id, 10)
+	}
+	out := make(map[string]string, len(raw))
+	online, err := s.opts.Cache.Exists(r.Context(), keys)
+	for i, v := range raw {
+		switch {
+		case err != nil:
+			out[strings.TrimSpace(v)] = "unknown"
+		case online[i]:
+			out[strings.TrimSpace(v)] = "online"
+		default:
+			out[strings.TrimSpace(v)] = "offline"
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }

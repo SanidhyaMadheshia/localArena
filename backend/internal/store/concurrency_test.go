@@ -51,7 +51,7 @@ func TestDuplicateJoinAcrossLobbies(t *testing.T) {
 	if got["ok"] != 1 || got[store.ErrAlreadyInLobby.Error()] != 9 {
 		t.Fatalf("results = %v", got)
 	}
-	if err := st.LeaveLobby(ctx, player); err != nil {
+	if _, err := st.LeaveLobby(ctx, player); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.JoinLobby(ctx, lobbies[0], player); err != nil {
@@ -171,11 +171,31 @@ func TestPgBouncerQueueWaitTimeout(t *testing.T) {
 	}
 	defer p.Close()
 	got := tally(run(12, func(int) error {
-		_, err := p.Exec(ctx, `SELECT pg_sleep(6)`)
-		return err
+		// Hold a server connection for 6 s; lift the 2 s statement_timeout for this transaction only.
+		return pgx.BeginFunc(ctx, p, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `SELECT pg_sleep(6)`)
+			return err
+		})
 	}))
 	t.Logf("pgbouncer results: %v", got)
 	if got["ok"] != 10 {
 		t.Fatalf("want 10 served, got %v", got)
+	}
+}
+
+// statement_timeout (2 s, migration 00007) cancels a runaway query server-side.
+func TestStatementTimeout(t *testing.T) {
+	ctx := ctxT(t)
+	start := time.Now()
+	_, err := st.Primary.Exec(ctx, `SELECT pg_sleep(5)`)
+	var pe *pgconn.PgError
+	if !errors.As(err, &pe) || pe.Code != "57014" {
+		t.Fatalf("want query_canceled (57014), got %v", err)
+	}
+	if d := time.Since(start); d < 1900*time.Millisecond || d > 3*time.Second {
+		t.Fatalf("cancelled after %v, want ~2 s", d)
 	}
 }

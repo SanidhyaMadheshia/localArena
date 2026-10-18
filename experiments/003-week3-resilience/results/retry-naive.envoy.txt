@@ -1,0 +1,3 @@
+cluster.api_rr.upstream_rq_2xx: 1873
+cluster.api_rr.upstream_rq_5xx: 1121
+cluster.api_rr.upstream_rq_pending_overflow: 324

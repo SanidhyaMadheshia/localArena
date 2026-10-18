@@ -17,10 +17,11 @@ PG := postgres://localarena:localarena-dev
 TEST_ENV := LOCALARENA_TEST_DATABASE_URL=$(PG)@localhost:5432/localarena \
 	LOCALARENA_TEST_REPLICA_URL=$(PG)@localhost:5433/localarena \
 	LOCALARENA_TEST_PGBOUNCER_URL=$(PG)@localhost:6432/localarena \
+	LOCALARENA_TEST_VALKEY_ADDR=localhost:6380 \
 	LOCALARENA_TEST_SHARD_URLS=$(PG)@localhost:5440/localarena,$(PG)@localhost:5441/localarena
 
 db-up:
-	docker compose --profile shards up -d --wait postgres postgres-replica pgbouncer pg-shard0 pg-shard1
+	docker compose --profile shards up -d --wait postgres postgres-replica pgbouncer valkey pg-shard0 pg-shard1
 
 itest:
 	cd $(BACKEND) && $(TEST_ENV) go test -count=1 -p 1 ./...
@@ -39,6 +40,7 @@ race:
 		-e LOCALARENA_TEST_DATABASE_URL=$(RACE_PG)@postgres:5432/localarena \
 		-e LOCALARENA_TEST_REPLICA_URL=$(RACE_PG)@postgres-replica:5432/localarena \
 		-e LOCALARENA_TEST_PGBOUNCER_URL=$(RACE_PG)@pgbouncer:5432/localarena \
+		-e LOCALARENA_TEST_VALKEY_ADDR=valkey:6379 \
 		-e CGO_ENABLED=1 $(GO_IMAGE) sh -c 'apk add -q gcc musl-dev && go test -race -count=1 -p 1 ./...'
 
 # Kubernetes (kind-localarena): CloudNativePG operator, cluster + pooler, migrate Job, API.

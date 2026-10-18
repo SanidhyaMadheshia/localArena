@@ -5,6 +5,12 @@ scrape_configs:
   - job_name: gameserver
     static_configs:
       - targets: ["gameserver:8080"]
-  - job_name: api
+  - job_name: api # every replica via Docker DNS
+    dns_sd_configs:
+      - names: ["api"]
+        type: A
+        port: 8081
+  - job_name: envoy
+    metrics_path: /stats/prometheus
     static_configs:
-      - targets: ["api:8081"]
+      - targets: ["envoy:9901"]

@@ -9,8 +9,11 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.72.1
+	github.com/sony/gobreaker/v2 v2.4.0
+	github.com/valkey-io/valkey-go v1.0.79
 	go.uber.org/goleak v1.3.0
 	golang.org/x/sync v0.24.0
+	golang.org/x/time v0.16.0
 )
 
 require (

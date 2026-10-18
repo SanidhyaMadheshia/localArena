@@ -1,0 +1,41 @@
+## 1. cold vs warm, two independent edges
+ Container localarena-edge-a-1 Restarting 
+ Container localarena-edge-b-1 Restarting 
+ Container localarena-edge-a-1 Started 
+ Container localarena-edge-b-1 Started 
+http://localhost:8090/assets/skin-gold.8a5d0cbba780.svg -> edge-a MISS
+http://localhost:8090/assets/skin-gold.8a5d0cbba780.svg -> edge-a HIT
+http://localhost:8090/assets/skin-gold.8a5d0cbba780.svg -> edge-a HIT
+http://localhost:8091/assets/skin-gold.8a5d0cbba780.svg -> edge-b MISS
+http://localhost:8091/assets/skin-gold.8a5d0cbba780.svg -> edge-b HIT
+http://localhost:8091/assets/skin-gold.8a5d0cbba780.svg -> edge-b HIT
+
+## 2. query strings do not fragment the cache
+?v=1 -> edge-a HIT    ?cachebust=1169 -> edge-a HIT
+
+## 3. 'invalidation' by publishing a new version (content-hashed URL)
+(new version already in bucket)
+old url /assets/skin-gold.8a5d0cbba780.svg -> edge-a HIT (still cached, still valid for old clients)
+new url /assets/skin-gold.3e7548bac9eb.svg -> edge-a MISS then edge-a HIT
+
+## 4. miss collapsing: 200 concurrent requests for a cold 2 MB object
+ Container localarena-edge-a-1 Restarting 
+ Container localarena-edge-a-1 Started 
+    200 200
+edge-a cache status for the burst (MISS = origin fetch; proxy_cache_lock on):
+    199 cache=HIT
+      2 cache=MISS
+
+## 5. origin down: cached assets keep serving, uncached ones fail fast
+ Container localarena-garage-1 Stopping 
+ Container localarena-garage-1 Stopped 
+cached   /assets/replay-sample.f28b5e85fca0.bin -> edge-a HIT 200 0.011553s
+uncached on edge-b /assets/skin-default -> 504 1.001461s
+ Container localarena-garage-1 Starting 
+ Container localarena-garage-1 Started 
+edge-a access log during outage:
+"GET /assets/replay-sample.f28b5e85fca0.bin HTTP/1.1" 200 2000000 cache=HIT
+"GET /assets/replay-sample.f28b5e85fca0.bin HTTP/1.1" 200 2000000 cache=HIT
+
+## 6. throughput: 2,000 requests (50 VUs) for the 2 MB replay, warm edge
+{"reqs":2000,"rps":120,"p50_ms":416.15699900000004,"p99_ms":494.68715144,"MBps":239}

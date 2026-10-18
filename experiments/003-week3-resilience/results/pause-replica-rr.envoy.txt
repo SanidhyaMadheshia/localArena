@@ -1,0 +1,5 @@
+cluster.api_lr.health_check.failure: 5
+cluster.api_rr.outlier_detection.ejections_enforced_total: 1
+cluster.api_rr.upstream_rq_per_try_timeout: 207
+cluster.api_rr.upstream_rq_retry: 207
+cluster.api_rr.upstream_rq_retry_success: 207

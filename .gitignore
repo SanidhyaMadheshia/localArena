@@ -20,3 +20,4 @@ config/*.dec.*
 .idea/
 .vscode/
 .DS_Store
+web/assets/replay-sample.bin

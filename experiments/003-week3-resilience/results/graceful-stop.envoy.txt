@@ -1,0 +1,3 @@
+cluster.api_lr.health_check.failure: 3
+cluster.api_rr.health_check.failure: 3
+cluster.api_rr.upstream_rq_2xx: 8708

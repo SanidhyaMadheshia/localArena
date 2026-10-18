@@ -1,0 +1,16 @@
+{
+ "mode": "naive",
+ "rate": 150,
+ "duration": "30s",
+ "logical_requests": 3311,
+ "logical_success_rate": 0.54,
+ "goodput_per_s": 60,
+ "attempts": 13380,
+ "amplification": 4.04,
+ "offered_attempts_per_s": 446,
+ "retry_budget_denied": 0,
+ "dropped_iterations": 1189,
+ "logical_p50_ms": 6784,
+ "logical_p95_ms": 12007,
+ "logical_p99_ms": 12011
+}

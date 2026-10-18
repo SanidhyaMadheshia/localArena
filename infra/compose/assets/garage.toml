@@ -1,0 +1,25 @@
+# Garage single node (local lab only; replication_factor 1 = no redundancy).
+# rpc_secret / admin_token are local-only placeholders; replace via env in any shared setup.
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "4c6f63616c4172656e612d6465762d6f6e6c792d7270632d7365637265742121"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+# Website endpoint: GET http://garage:3902/<key> with Host: <bucket>.web.garage.localhost
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.localhost"
+index = "index.html"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "localarena-dev-admin-token"

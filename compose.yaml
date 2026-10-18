@@ -103,23 +103,77 @@ services:
       postgres: { condition: service_healthy }
     restart: "no"
 
+  # 3 stateless replicas, reachable only through Envoy (no host port).
+  # Kill one:  docker kill localarena-api-2      Hang one: docker pause localarena-api-2
   api:
     image: localarena/api:dev
     pull_policy: build
     build: { context: ., target: api }
-    ports: ["8081:8081"]
     environment:
       ADDR: ":8081"
       DATABASE_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@pgbouncer:5432/localarena
       REPLICA_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres-replica:5432/localarena
+      VALKEY_ADDR: valkey:6379
+      CACHE_SINGLEFLIGHT: ${CACHE_SINGLEFLIGHT:-1}
+      PROFILE_TTL: ${PROFILE_TTL:-30s}
+      PROFILE_LOAD_DELAY: ${PROFILE_LOAD_DELAY:-0s} # experiments only: simulate an expensive cache fill
+      TRUST_PROXY: "1"
+      DRAIN_SECONDS: "5"
     depends_on:
       migrate: { condition: service_completed_successfully }
       pgbouncer: { condition: service_started }
       postgres-replica: { condition: service_healthy }
     deploy:
+      replicas: 3
       resources:
-        limits: { cpus: "2", memory: 256M }
+        limits: { cpus: "1", memory: 256M }
+    stop_grace_period: 20s # > DRAIN_SECONDS + in-flight requests
     restart: unless-stopped
+
+  # Edge proxy: :10000 round robin, :10001 least request, admin on loopback :9901.
+  envoy:
+    image: envoyproxy/envoy:v1.40.0
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    volumes: ["./infra/compose/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro"]
+    ports: ["10000:10000", "10001:10001", "127.0.0.1:9901:9901"]
+    depends_on: [api]
+    restart: unless-stopped
+
+  # Cache/presence/rate limits. Disposable: no persistence, LRU eviction at 128 MB.
+  valkey:
+    image: valkey/valkey:9.0.6-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["127.0.0.1:6380:6379"] # host 6379 is often taken by a system redis-server
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: unless-stopped
+
+  # Object storage for maps/skins/replays (MinIO was archived upstream in 2026; Garage is the S3 replacement).
+  garage:
+    image: dxflrs/garage:v2.4.1
+    command: ["/garage", "server", "--single-node"]
+    volumes:
+      - ./infra/compose/assets/garage.toml:/etc/garage.toml:ro
+      - garage-data:/var/lib/garage
+    ports: ["127.0.0.1:3900:3900", "127.0.0.1:3902:3902"]
+    restart: unless-stopped
+
+  # Two independent caching edges ("PoPs") in front of Garage's website endpoint.
+  edge-a: &edge
+    image: nginx:1.31.7-alpine
+    hostname: edge-a
+    volumes: ["./infra/compose/assets/nginx-edge.conf:/etc/nginx/conf.d/default.conf:ro"]
+    tmpfs: ["/var/cache/nginx"]
+    ports: ["8090:80"]
+    depends_on: [garage]
+    restart: unless-stopped
+  edge-b:
+    <<: *edge
+    hostname: edge-b
+    ports: ["8091:80"]
 
   pg-shard0:
     <<: *pg
@@ -150,5 +204,6 @@ services:
     depends_on: [gameserver]
 
 volumes:
+  garage-data:
   pg-primary:
   pg-replica:

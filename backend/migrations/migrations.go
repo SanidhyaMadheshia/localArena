@@ -7,7 +7,8 @@ import (
 	"embed"
 	"fmt"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 )
@@ -17,10 +18,14 @@ var FS embed.FS
 
 // Provider returns a goose provider for dsn. The caller must Close the DB.
 func Provider(dsn string) (*goose.Provider, *sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
+	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Migrations (index builds, backfills) may legitimately run longer than
+	// the application's 2 s statement_timeout set by 00007.
+	cfg.RuntimeParams["statement_timeout"] = "0"
+	db := stdlib.OpenDB(*cfg)
 	// A Postgres advisory lock serializes concurrent migrators (e.g. two Jobs or
 	// a Job plus a manual run): the loser waits instead of racing on DDL.
 	locker, err := lock.NewPostgresSessionLocker(lock.WithLockTimeout(5, 60))

@@ -1,0 +1,47 @@
+{
+ "base": "http://localhost:10001",
+ "rate": 300,
+ "duration": "30s",
+ "requests": 8843,
+ "failed_rate": 0,
+ "status_5xx": 0,
+ "rate_limited": 0,
+ "cache_hits": 5115,
+ "dropped_iterations": 158,
+ "p50": 2.46,
+ "p95": 6.91,
+ "p99": 2517.29,
+ "max": 2537.04,
+ "endpoints": {
+  "profile": {
+   "p50": 2.38,
+   "p95": 5.36,
+   "p99": 2516.18,
+   "failed": 0
+  },
+  "history": {
+   "p50": 5.16,
+   "p95": 9.35,
+   "p99": 2518.9,
+   "failed": 0
+  },
+  "cosmetics": {
+   "p50": 2.47,
+   "p95": 6.44,
+   "p99": 2522.73,
+   "failed": 0
+  },
+  "presence": {
+   "p50": 2.21,
+   "p95": 4.25,
+   "p99": 2513.29,
+   "failed": 0
+  },
+  "purchase": {
+   "p50": 5.45,
+   "p95": 10.7,
+   "p99": 2514,
+   "failed": 0
+  }
+ }
+}

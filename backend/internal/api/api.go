@@ -10,12 +10,17 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/cache"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/ratelimit"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
 
@@ -28,14 +33,54 @@ const (
 	maxBody         = 4 << 10
 )
 
+// Options tunes caching and rate limits.
+type Options struct {
+	Cache      *cache.Cache // may be nil or disabled
+	ProfileTTL time.Duration
+	// ProfileLoadDelay adds latency to profile cache fills (experiments only).
+	ProfileLoadDelay time.Duration
+	TrustProxy       bool // take the client IP from X-Forwarded-For (set by Envoy)
+	PurchaseRL       ratelimit.Rule
+	CreateRL         ratelimit.Rule
+	PresenceTTL      time.Duration
+}
+
 // Server holds dependencies.
 type Server struct {
-	st  *store.Store
-	log *slog.Logger
+	st       *store.Store
+	log      *slog.Logger
+	opts     Options
+	limiter  *ratelimit.Limiter
+	draining atomic.Bool
 }
 
 // New returns a Server.
-func New(st *store.Store, log *slog.Logger) *Server { return &Server{st: st, log: log} }
+func New(st *store.Store, log *slog.Logger, opts ...Options) *Server {
+	o := Options{}
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	if o.Cache == nil {
+		o.Cache = cache.New(cache.Options{}, log) // disabled: every lookup goes to the database
+	}
+	if o.ProfileTTL <= 0 {
+		o.ProfileTTL = 30 * time.Second
+	}
+	if o.PresenceTTL <= 0 {
+		o.PresenceTTL = 30 * time.Second
+	}
+	if o.PurchaseRL.Rate == 0 {
+		o.PurchaseRL = ratelimit.Rule{Rate: 2, Burst: 5}
+	}
+	if o.CreateRL.Rate == 0 {
+		o.CreateRL = ratelimit.Rule{Rate: 5, Burst: 20}
+	}
+	return &Server{st: st, log: log, opts: o, limiter: ratelimit.New(o.Cache)}
+}
+
+// Drain makes /readyz fail so load balancers stop sending new requests
+// before shutdown (graceful drain, adr/0007).
+func (s *Server) Drain() { s.draining.Store(true) }
 
 // Handler returns the router.
 func (s *Server) Handler() http.Handler {
@@ -49,6 +94,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/purchases", s.purchase)
 	mux.HandleFunc("POST /v1/lobbies", s.createLobby)
 	mux.HandleFunc("POST /v1/lobbies/{id}/members", s.joinLobby)
+	mux.HandleFunc("GET /v1/lobbies/{id}", s.getLobby)
+	mux.HandleFunc("PUT /v1/players/{id}/presence", s.heartbeat)
+	mux.HandleFunc("GET /v1/presence", s.presence)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.Handle("GET /metrics", promhttp.Handler())
@@ -66,6 +114,10 @@ func withTimeout(next http.Handler) http.Handler {
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if s.draining.Load() {
+		http.Error(w, "draining", http.StatusServiceUnavailable)
+		return
+	}
 	if err := s.st.Primary.Ping(r.Context()); err != nil {
 		http.Error(w, "primary unavailable", http.StatusServiceUnavailable)
 		return
@@ -96,6 +148,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, store.ErrConflict), errors.Is(err, context.DeadlineExceeded), store.IsUnavailable(err):
 		status = http.StatusServiceUnavailable
 		w.Header().Set("Retry-After", "1")
+		noProxyRetry(w)
 	}
 	msg := err.Error()
 	if status == http.StatusServiceUnavailable {
@@ -133,3 +186,52 @@ func (s *Server) stampLSN(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderWriteLSN, lsn)
 	}
 }
+
+// clientIP returns the caller's address. Behind Envoy (TrustProxy) it is the
+// rightmost X-Forwarded-For entry, the one Envoy itself appended; entries to
+// its left are client-controlled and must not be trusted.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.opts.TrustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			return strings.TrimSpace(parts[len(parts)-1])
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// allow applies a rate-limit rule; on rejection it writes 429 + Retry-After.
+func (s *Server) allow(w http.ResponseWriter, r *http.Request, key string, rule ratelimit.Rule) bool {
+	d := s.limiter.Allow(r.Context(), key, rule)
+	w.Header().Set("X-RateLimit-Backend", d.Backend)
+	if d.Allowed {
+		return true
+	}
+	secs := int(d.RetryAfter.Seconds()) + 1
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited"})
+	return false
+}
+
+func profileKey(id int64) string { return "profile:v1:" + strconv.FormatInt(id, 10) }
+func lobbyKey(id int64) string   { return "lobby:v1:" + strconv.FormatInt(id, 10) }
+
+// invalidate drops cache entries after a committed write. Failure is logged,
+// not returned: the write succeeded, and the entry expires within its TTL.
+func (s *Server) invalidate(r *http.Request, keys ...string) {
+	for _, k := range keys {
+		if err := s.opts.Cache.Invalidate(r.Context(), k); err != nil && s.opts.Cache.Enabled() {
+			s.log.Warn("cache invalidation failed; stale until TTL", "key", k, "err", err)
+		}
+	}
+}
+
+// noProxyRetry marks a response as caused by a shared dependency (database,
+// Valkey), not by this replica. Envoy does not retry responses carrying
+// x-envoy-ratelimited, so a dependency outage is not multiplied by the proxy
+// trying every replica (Experiment 003). Clients still see Retry-After.
+func noProxyRetry(w http.ResponseWriter) { w.Header().Set("X-Envoy-Ratelimited", "dependency") }

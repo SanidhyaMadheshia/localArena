@@ -63,10 +63,10 @@ func (s *Store) JoinLobby(ctx context.Context, lobbyID, playerID int64) error {
 	return mapLobbyErr(err)
 }
 
-// LeaveLobby removes the player from whichever lobby they are in.
-func (s *Store) LeaveLobby(ctx context.Context, playerID int64) error {
-	return s.inTx(ctx, func(tx pgx.Tx) error {
-		var lobbyID int64
+// LeaveLobby removes the player from whichever lobby they are in and returns its ID.
+func (s *Store) LeaveLobby(ctx context.Context, playerID int64) (int64, error) {
+	var lobbyID int64
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `DELETE FROM lobby_members WHERE player_id = $1 RETURNING lobby_id`, playerID).Scan(&lobbyID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -77,6 +77,29 @@ func (s *Store) LeaveLobby(ctx context.Context, playerID int64) error {
 		_, err = tx.Exec(ctx, `UPDATE lobbies SET member_count = member_count - 1, version = version + 1 WHERE id = $1`, lobbyID)
 		return err
 	})
+	return lobbyID, err
+}
+
+// Lobby is a lobby with its members.
+type Lobby struct {
+	ID       int64   `json:"id"`
+	OwnerID  int64   `json:"owner_id"`
+	Capacity int     `json:"capacity"`
+	Status   string  `json:"status"`
+	Members  []int64 `json:"members"`
+}
+
+// GetLobby reads a lobby and its members from the primary in one query.
+func (s *Store) GetLobby(ctx context.Context, id int64) (Lobby, error) {
+	var l Lobby
+	err := s.Primary.QueryRow(ctx, `
+		SELECT l.id, l.owner_id, l.capacity, l.status,
+		       coalesce(array(SELECT player_id FROM lobby_members WHERE lobby_id = l.id ORDER BY player_id), '{}')
+		FROM lobbies l WHERE l.id = $1`, id).Scan(&l.ID, &l.OwnerID, &l.Capacity, &l.Status, &l.Members)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return l, ErrNotFound
+	}
+	return l, err
 }
 
 // LobbyMembers returns member IDs (for tests and the API).

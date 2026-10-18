@@ -1,0 +1,16 @@
+{
+ "mode": "backoff",
+ "rate": 150,
+ "duration": "30s",
+ "logical_requests": 4314,
+ "logical_success_rate": 0.465,
+ "goodput_per_s": 67,
+ "attempts": 5647,
+ "amplification": 1.31,
+ "offered_attempts_per_s": 188,
+ "retry_budget_denied": 2099,
+ "dropped_iterations": 187,
+ "logical_p50_ms": 42,
+ "logical_p95_ms": 2548,
+ "logical_p99_ms": 6214
+}
