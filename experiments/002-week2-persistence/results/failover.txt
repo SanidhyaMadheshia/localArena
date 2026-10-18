@@ -1,0 +1,13 @@
+# run 1 (pooler defaults: server_login_retry=15, smartShutdownTimeout=180 default -> set 10)
+primary before: arena-db-1
+deleting arena-db-1 at 1792313913
+primary after: arena-db-2
+writes ok=360 failed=48
+write outage window: 15 s (first fail 1792313925, last fail 1792313939)
+
+# run 2 (server_login_retry=1)
+primary before: arena-db-2
+deleting arena-db-2 at 1792314008
+primary after: arena-db-1
+writes ok=483 failed=3
+write outage window: 1 s (first fail 1792314020, last fail 1792314020)

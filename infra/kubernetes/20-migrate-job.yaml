@@ -1,0 +1,28 @@
+# Schema migration Job. Runs directly against the primary (arena-db-rw), not the
+# pooler, because CREATE INDEX CONCURRENTLY cannot run under transaction pooling.
+# goose holds a Postgres advisory lock, so overlapping runs serialize.
+# Re-run: kubectl -n localarena delete job migrate && kubectl apply -f infra/kubernetes/20-migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: localarena
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: migrate
+          image: localarena/api:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/migrate", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: arena-db-app, key: uri } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 64Mi }

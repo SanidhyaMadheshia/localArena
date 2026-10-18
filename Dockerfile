@@ -15,7 +15,7 @@ COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY backend/ ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/gameserver ./cmd/bots
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/gameserver ./cmd/bots ./cmd/api ./cmd/migrate
 
 # Distroless static: no shell, no package manager, runs as uid 65532.
 FROM gcr.io/distroless/static-debian12:nonroot AS gameserver
@@ -29,3 +29,11 @@ ENTRYPOINT ["/gameserver"]
 FROM gcr.io/distroless/static-debian12:nonroot AS bots
 COPY --from=build /out/bots /bots
 ENTRYPOINT ["/bots"]
+
+# API image also carries the migrate binary (used by the Compose "migrate" service and the k8s Job).
+FROM gcr.io/distroless/static-debian12:nonroot AS api
+COPY --from=build /out/api /api
+COPY --from=build /out/migrate /migrate
+ENV ADDR=:8081
+EXPOSE 8081
+ENTRYPOINT ["/api"]

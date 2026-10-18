@@ -1,0 +1,64 @@
+# CloudNativePG cluster: 1 primary + 1 streaming replica with automated failover.
+# The operator creates:
+#   Services arena-db-rw (primary), arena-db-ro (replicas only), arena-db-r (any)
+#   Secret   arena-db-app (generated credentials for the "localarena" owner)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: arena-db
+  namespace: localarena
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+  primaryUpdateStrategy: unsupervised
+  # A pooler never closes its server connections, so Postgres "smart" shutdown
+  # would wait the full default 180 s before failover (Experiment 002). 10 s
+  # lets in-flight transactions finish, then shutdown proceeds as "fast".
+  smartShutdownTimeout: 10
+  # Spread instances over the two kind nodes so a node loss is a real failover.
+  affinity:
+    podAntiAffinityType: preferred
+  postgresql:
+    parameters:
+      log_lock_waits: "on"
+      deadlock_timeout: "200ms"
+      track_io_timing: "on"
+      max_connections: "100"
+  bootstrap:
+    initdb:
+      database: localarena
+      owner: localarena
+  storage:
+    size: 1Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+---
+# Operator-managed PgBouncer in transaction mode in front of the primary.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: arena-db-pooler-rw
+  namespace: localarena
+spec:
+  cluster: { name: arena-db }
+  instances: 1
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      default_pool_size: "10"
+      max_client_conn: "500"
+      max_prepared_statements: "200"
+      query_wait_timeout: "5"
+      # After a failed server login PgBouncer rejects clients with the cached
+      # error for server_login_retry seconds (default 15). During failover that
+      # turns a ~1 s promotion into a 15 s outage (Experiment 002).
+      server_login_retry: "1"
+  template:
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }

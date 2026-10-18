@@ -1,6 +1,36 @@
-# LocalArena Week 1 stack. Start: docker compose up -d --build
-# Optional profiles: "observability" (Prometheus), "load" (bot swarm).
+# LocalArena local stack. Start: docker compose up -d --build
+# Profiles: "observability" (Prometheus), "load" (bot swarm), "shards" (2 extra Postgres for the router prototype).
+# Passwords below are local-only defaults; override via environment, never reuse elsewhere.
 name: localarena
+
+x-pg: &pg
+  image: postgres:18.6-alpine
+  environment: &pgenv
+    POSTGRES_USER: localarena
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localarena-dev}
+    POSTGRES_DB: localarena
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U localarena -d localarena"]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+  deploy:
+    resources:
+      limits: { cpus: "2", memory: 512M }
+
+# Shared server settings: lock/deadlock visibility and query statistics.
+x-pg-cmd: &pgcmd
+  - postgres
+  - -c
+  - shared_preload_libraries=pg_stat_statements
+  - -c
+  - log_lock_waits=on
+  - -c
+  - deadlock_timeout=200ms
+  - -c
+  - track_io_timing=on
+  - -c
+  - max_connections=100
 
 services:
   gameserver:
@@ -16,12 +46,100 @@ services:
         limits: { cpus: "2", memory: 512M }
     restart: unless-stopped
 
+  postgres:
+    <<: *pg
+    command: *pgcmd
+    environment:
+      <<: *pgenv
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replicator-dev}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      - pg-primary:/var/lib/postgresql
+      - ./infra/compose/postgres/primary-init.sh:/docker-entrypoint-initdb.d/10-replication.sh:ro
+
+  postgres-replica:
+    <<: *pg
+    user: postgres
+    entrypoint: ["/bin/sh", "/replica-entrypoint.sh"]
+    environment:
+      <<: *pgenv
+      PRIMARY_HOST: postgres
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replicator-dev}
+    ports: ["127.0.0.1:5433:5432"]
+    volumes:
+      - pg-replica:/var/lib/postgresql
+      - ./infra/compose/postgres/replica-entrypoint.sh:/replica-entrypoint.sh:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Transaction pooling: a server connection is held only for one transaction,
+  # so many app connections share few Postgres backends. Session state (SET,
+  # advisory session locks, LISTEN) does not survive between transactions.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.0-p0
+    environment:
+      DATABASE_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres:5432/localarena
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: "10"
+      MAX_CLIENT_CONN: "500"
+      MAX_PREPARED_STATEMENTS: "200" # pgx caches prepared statements; pgbouncer >=1.21 tracks them
+      QUERY_WAIT_TIMEOUT: "5"         # seconds a client may wait for a server connection
+      ADMIN_USERS: localarena
+    ports: ["127.0.0.1:6432:5432"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  migrate:
+    build: { context: ., target: api }
+    image: localarena/api:dev
+    pull_policy: build
+    entrypoint: ["/migrate"]
+    command: ["up"]
+    environment:
+      # Migrations go direct to the primary: DDL with CONCURRENTLY cannot run through transaction pooling.
+      DATABASE_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres:5432/localarena
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    image: localarena/api:dev
+    pull_policy: build
+    build: { context: ., target: api }
+    ports: ["8081:8081"]
+    environment:
+      ADDR: ":8081"
+      DATABASE_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@pgbouncer:5432/localarena
+      REPLICA_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres-replica:5432/localarena
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      pgbouncer: { condition: service_started }
+      postgres-replica: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 256M }
+    restart: unless-stopped
+
+  pg-shard0:
+    <<: *pg
+    profiles: ["shards"]
+    command: *pgcmd
+    ports: ["127.0.0.1:5440:5432"]
+    tmpfs: ["/var/lib/postgresql"]
+
+  pg-shard1:
+    <<: *pg
+    profiles: ["shards"]
+    command: *pgcmd
+    ports: ["127.0.0.1:5441:5432"]
+    tmpfs: ["/var/lib/postgresql"]
+
   prometheus:
     profiles: ["observability"]
     image: prom/prometheus:v3.13.4
     ports: ["127.0.0.1:9090:9090"]
     volumes: ["./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
-    depends_on: [gameserver]
 
   bots:
     profiles: ["load"]
@@ -30,3 +148,7 @@ services:
     pull_policy: build
     command: ["-server", "http://gameserver:8080", "-bots", "100", "-duration", "60s"]
     depends_on: [gameserver]
+
+volumes:
+  pg-primary:
+  pg-replica:
