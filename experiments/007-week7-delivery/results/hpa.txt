@@ -1,0 +1,17 @@
++0s cpu: 3%/60% replicas=2 ready=2
++15s cpu: 3%/60% replicas=2 ready=2
++30s cpu: 3%/60% replicas=2 ready=2
++45s cpu: 309%/60% replicas=2 ready=2
++60s cpu: 482%/60% replicas=4 ready=5
++75s cpu: 537%/60% replicas=5 ready=5
++90s cpu: 260%/60% replicas=5 ready=5
++105s cpu: 197%/60% replicas=5 ready=5
++120s cpu: 211%/60% replicas=5 ready=5
++135s cpu: 219%/60% replicas=5 ready=5
++150s cpu: 194%/60% replicas=5 ready=5
++165s cpu: 210%/60% replicas=5 ready=5
++180s cpu: 208%/60% replicas=5 ready=5
+    http_req_duration..............: avg=3.45ms min=346.16µs med=1.66ms max=171.45ms p(90)=5.98ms p(95)=9.82ms 
+    http_req_failed................: 0.00%  0 out of 90000
+    http_reqs......................: 90000  599.981171/s
++150s after load: cpu: replicas=2

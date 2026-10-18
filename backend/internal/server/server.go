@@ -63,6 +63,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /status/stream", s.handleStatusStream)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	// Readiness fails while draining so Services/LBs stop sending new players here.
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if s.mgr.Draining() {
+			http.Error(w, "draining", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ready\n"))
+	})
 	mux.Handle("GET /metrics", promhttp.Handler())
 	if s.cfg.WebDir != "" {
 		mux.Handle("GET /", http.FileServer(http.Dir(s.cfg.WebDir)))

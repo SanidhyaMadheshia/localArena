@@ -1,0 +1,45 @@
+# Game servers are stateful while a match runs: they drain instead of dying
+# (adr/0018). Recreate strategy: a node never runs two versions of one match.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gameserver
+  labels: {{- include "la.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gameserver.replicas }}
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: gameserver } }
+  template:
+    metadata:
+      labels: { app: gameserver }
+    spec:
+      {{- include "la.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .Values.gameserver.terminationGracePeriodSeconds }}
+      containers:
+        - name: gameserver
+          image: {{ .Values.image.gameserver.repository }}:{{ .Values.image.gameserver.tag }}
+          imagePullPolicy: {{ .Values.image.gameserver.pullPolicy }}
+          args: ["-tick-hz", "20", "-capacity", "20", "-round-seconds", {{ .Values.gameserver.roundSeconds | quote }},
+                 "-drain-timeout", "{{ sub .Values.gameserver.terminationGracePeriodSeconds 5 }}s"]
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: DEBUG_ADDR, value: "" }
+            - { name: ALLOW_GUESTS, value: {{ ternary "1" "0" .Values.gameserver.allowGuests | quote }} }
+            {{- if .Values.flagd.enabled }}
+            - { name: FLAGD_URL, value: "http://flagd:8016" }
+            {{- end }}
+          {{- with .Values.secrets.existing }}
+          envFrom: [{ secretRef: { name: {{ . }} } }]
+          {{- end }}
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 2, failureThreshold: 1 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          {{- include "la.containerSecurity" . | nindent 10 }}
+          resources: {{- toYaml .Values.gameserver.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gameserver
+spec:
+  selector: { app: gameserver }
+  ports: [{ name: http, port: 8080, targetPort: http }]

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/engine"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/events"
@@ -18,6 +19,7 @@ import (
 var (
 	ErrClosed         = errors.New("match: manager closed")
 	ErrAlreadyPlaying = errors.New("match: player already connected")
+	ErrDraining       = errors.New("match: server draining, join another server")
 )
 
 // GuestIDBase is the first ID for sessions without an account. Account IDs
@@ -49,14 +51,15 @@ type Manager struct {
 	cancel context.CancelFunc
 	nextID atomic.Uint32
 
-	mu      sync.Mutex
-	active  map[engine.PlayerID]bool
-	matches []*slot
-	nextM   int
-	closed  bool
-	version uint64
-	changed chan struct{} // closed and replaced on every membership change
-	wg      sync.WaitGroup
+	mu       sync.Mutex
+	active   map[engine.PlayerID]bool
+	matches  []*slot
+	nextM    int
+	closed   bool
+	draining bool
+	version  uint64
+	changed  chan struct{} // closed and replaced on every membership change
+	wg       sync.WaitGroup
 }
 
 type slot struct {
@@ -95,6 +98,10 @@ func (mg *Manager) Join(account ...engine.PlayerID) (*Match, *Client, error) {
 	if mg.closed {
 		mg.mu.Unlock()
 		return nil, nil, ErrClosed
+	}
+	if mg.draining {
+		mg.mu.Unlock()
+		return nil, nil, ErrDraining
 	}
 	if id == 0 {
 		id = engine.PlayerID(mg.nextID.Add(1))
@@ -206,4 +213,35 @@ func (mg *Manager) Close() {
 	mg.mu.Unlock()
 	mg.cancel()
 	mg.wg.Wait()
+}
+
+// Drain stops admitting players and waits until every match is empty (players
+// finish and leave) or ctx ends (adr/0018). Kubernetes: preStop/SIGTERM starts
+// it, terminationGracePeriodSeconds bounds it. Returns the players still
+// connected when it gave up.
+func (mg *Manager) Drain(ctx context.Context) int {
+	mg.mu.Lock()
+	mg.draining = true
+	mg.bumpLocked()
+	mg.mu.Unlock()
+	t := time.NewTicker(200 * time.Millisecond)
+	defer t.Stop()
+	for {
+		st, _ := mg.Status()
+		if st.Players == 0 {
+			return 0
+		}
+		select {
+		case <-ctx.Done():
+			return st.Players
+		case <-t.C:
+		}
+	}
+}
+
+// Draining reports whether Drain has started (readiness).
+func (mg *Manager) Draining() bool {
+	mg.mu.Lock()
+	defer mg.mu.Unlock()
+	return mg.draining
 }

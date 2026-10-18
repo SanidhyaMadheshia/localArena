@@ -1,0 +1,10 @@
+# kind dev cluster: smaller, fast rollouts, short rounds for drills.
+api:
+  replicas: 2
+  hpa: { enabled: true, min: 2, max: 5, cpuUtilization: 60 }
+gameserver:
+  roundSeconds: 30
+  terminationGracePeriodSeconds: 45
+postgres:
+  instances: 2
+  poolerInstances: 2

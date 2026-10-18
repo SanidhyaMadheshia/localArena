@@ -1,0 +1,114 @@
+{{- if .Values.valkey.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: valkey, labels: { app: valkey } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: valkey } }
+  template:
+    metadata: { labels: { app: valkey } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.0.6-alpine
+          args: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+          ports: [{ name: valkey, containerPort: 6379 }]
+          readinessProbe: { exec: { command: ["valkey-cli", "ping"] }, periodSeconds: 5 }
+          {{- include "la.containerSecurity" . | nindent 10 }}
+          volumeMounts: [{ name: data, mountPath: /data }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: valkey }
+spec: { selector: { app: valkey }, ports: [{ name: valkey, port: 6379 }] }
+{{- end }}
+{{- if .Values.opa.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: opa-policy }
+data:
+  localarena.rego: |-
+{{ .Files.Get "files/localarena.rego" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opa, labels: { app: opa } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: opa } }
+  template:
+    metadata:
+      labels: { app: opa }
+      annotations: { checksum/policy: {{ .Files.Get "files/localarena.rego" | sha256sum }} }
+    spec:
+      {{- include "la.podSecurity" . | nindent 6 }}
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:1.21.2-static
+          # Load the one file: a ConfigMap dir also contains ..data/ symlinks and OPA
+          # would load the policy three times ("multiple default rules").
+          args: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "/policies/localarena.rego"]
+          ports: [{ name: http, containerPort: 8181 }]
+          readinessProbe: { httpGet: { path: "/health?bundles", port: http }, periodSeconds: 5 }
+          volumeMounts: [{ name: policy, mountPath: /policies, readOnly: true }]
+          {{- include "la.containerSecurity" . | nindent 10 }}
+          resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } }
+      volumes: [{ name: policy, configMap: { name: opa-policy } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: opa }
+spec: { selector: { app: opa }, ports: [{ name: http, port: 8181 }] }
+{{- end }}
+{{- if .Values.flagd.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: flagd-flags }
+data:
+  flags.json: |-
+{{ .Files.Get "files/flags.json" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: flagd, labels: { app: flagd } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: flagd } }
+  template:
+    metadata: { labels: { app: flagd } }
+    spec:
+      {{- include "la.podSecurity" . | nindent 6 }}
+      containers:
+        - name: flagd
+          image: ghcr.io/open-feature/flagd:v0.18.0
+          args: ["start", "--uri", "file:/etc/flagd/flags.json"]
+          ports: [{ name: ofrep, containerPort: 8016 }]
+          volumeMounts: [{ name: flags, mountPath: /etc/flagd, readOnly: true }]
+          {{- include "la.containerSecurity" . | nindent 10 }}
+          resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 64Mi } }
+      volumes: [{ name: flags, configMap: { name: flagd-flags } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: flagd }
+spec: { selector: { app: flagd }, ports: [{ name: ofrep, port: 8016 }] }
+{{- end }}
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: { name: localarena }
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - { path: /ws, pathType: Prefix, backend: { service: { name: gameserver, port: { number: 8080 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: api, port: { number: 8081 } } } }
+{{- end }}

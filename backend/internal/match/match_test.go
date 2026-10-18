@@ -1,6 +1,7 @@
 package match
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -166,5 +167,33 @@ func TestModeFlagPerRound(t *testing.T) {
 	}
 	if ApplyMode(m.cfg, "frenzy").Items != 30 || ApplyMode(m.cfg, "unknown").Items != 10 {
 		t.Fatal("ApplyMode")
+	}
+}
+
+func TestDrainRefusesJoinsAndWaitsForPlayers(t *testing.T) {
+	mg := NewManager(Options{})
+	defer mg.Close()
+	m, c, _ := mg.Join()
+	done := make(chan int)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		done <- mg.Drain(ctx)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if !mg.Draining() {
+		t.Fatal("not draining")
+	}
+	if _, _, err := mg.Join(); err != ErrDraining {
+		t.Fatalf("join while draining: %v", err)
+	}
+	select {
+	case <-done:
+		t.Fatal("drain returned while a player was connected")
+	case <-time.After(300 * time.Millisecond):
+	}
+	mg.Leave(m, c) // the player's match ends
+	if left := <-done; left != 0 {
+		t.Fatalf("left = %d", left)
 	}
 }

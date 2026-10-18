@@ -1,0 +1,12 @@
+# Argo CD for the lab: single replicas, no Dex/notifications, plain HTTP inside
+# the cluster (reach the UI with kubectl port-forward). Admin password is in the
+# argocd-initial-admin-secret Secret.
+configs:
+  params: { server.insecure: true }
+dex: { enabled: false }
+notifications: { enabled: false }
+applicationSet: { replicas: 1 }
+controller: { resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 768Mi } } }
+repoServer: { resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 384Mi } } }
+server: { resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } } }
+redis: { resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } } }

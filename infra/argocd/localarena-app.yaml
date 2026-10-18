@@ -1,0 +1,29 @@
+# GitOps (adr/0020): Argo CD renders infra/helm/localarena from main and keeps
+# the cluster in sync. The migrate Job runs as a PreSync hook; a failed sync
+# leaves the previous ReplicaSets serving. Self-heal reverts manual drift.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: localarena
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SanidhyaMadheshia/localArena.git
+    targetRevision: main
+    path: infra/helm/localarena
+    helm:
+      releaseName: localarena
+      valueFiles: [values-dev.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: localarena
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, RespectIgnoreDifferences=true]
+    retry: { limit: 3, backoff: { duration: 10s, factor: 2, maxDuration: 2m } }
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: api
+      jsonPointers: [/spec/replicas] # owned by the HPA

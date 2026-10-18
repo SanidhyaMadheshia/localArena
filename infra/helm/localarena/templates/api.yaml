@@ -1,0 +1,100 @@
+{{- define "la.apiPod" -}}
+metadata:
+  labels: { app: api, track: {{ .track }} }
+spec:
+  {{- include "la.podSecurity" .root | nindent 2 }}
+  terminationGracePeriodSeconds: 20
+  {{- include "la.spread" "api" | nindent 2 }}
+  containers:
+    - name: api
+      image: {{ .root.Values.image.api.repository }}:{{ .tag }}
+      imagePullPolicy: {{ .root.Values.image.api.pullPolicy }}
+      ports: [{ name: http, containerPort: 8081 }]
+      env:
+        {{- include "la.dbEnv" .root | nindent 8 }}
+        - { name: DATABASE_URL, value: "host=arena-db-pooler-rw port=5432 dbname=localarena user=localarena password=$(DB_PASSWORD)" }
+        - { name: REPLICA_URL, value: "host=arena-db-ro port=5432 dbname=localarena user=localarena password=$(DB_PASSWORD)" }
+        - { name: DB_MAX_CONNS, value: "10" }
+        - { name: DRAIN_SECONDS, value: {{ .root.Values.api.drainSeconds | quote }} }
+        - { name: LEGACY_V1, value: {{ ternary "1" "0" .root.Values.api.legacyV1 | quote }} }
+        - { name: APP_TRACK, value: {{ .track | quote }} }
+        {{- if .root.Values.valkey.enabled }}
+        - { name: VALKEY_ADDR, value: "valkey:6379" }
+        {{- end }}
+        {{- if .root.Values.opa.enabled }}
+        - { name: OPA_URL, value: "http://opa:8181" }
+        {{- end }}
+        {{- with .root.Values.oidc.issuer }}
+        - { name: OIDC_ISSUER, value: {{ . | quote }} }
+        - { name: OIDC_JWKS_URL, value: {{ $.root.Values.oidc.jwksURL | quote }} }
+        {{- end }}
+      {{- with .root.Values.secrets.existing }}
+      envFrom: [{ secretRef: { name: {{ . }} } }]
+      {{- end }}
+      startupProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 2, failureThreshold: 30 }
+      readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 3, failureThreshold: 2 }
+      livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+      {{- include "la.containerSecurity" .root | nindent 6 }}
+      resources: {{- toYaml .root.Values.api.resources | nindent 8 }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: {{- include "la.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.api.hpa.enabled }}
+  replicas: {{ .Values.api.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: {{ .Values.api.maxSurge }}, maxUnavailable: {{ .Values.api.maxUnavailable }} }
+  selector: { matchLabels: { app: api, track: stable } }
+  template: {{- include "la.apiPod" (dict "root" . "track" "stable" "tag" .Values.image.api.tag) | nindent 4 }}
+{{- if .Values.api.canary.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-canary
+  labels: {{- include "la.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.canary.replicas }}
+  selector: { matchLabels: { app: api, track: canary } }
+  template: {{- include "la.apiPod" (dict "root" . "track" "canary" "tag" .Values.api.canary.tag) | nindent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: {{- include "la.labels" . | nindent 4 }}
+spec:
+  selector: { app: api } # stable + canary
+  ports: [{ name: http, port: 8081, targetPort: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: api, track: stable } }
+{{- if .Values.api.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api }
+  minReplicas: {{ .Values.api.hpa.min }}
+  maxReplicas: {{ .Values.api.hpa.max }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ .Values.api.hpa.cpuUtilization }} } }
+  behavior:
+    scaleUp: { stabilizationWindowSeconds: 0, policies: [{ type: Pods, value: 2, periodSeconds: 15 }] }
+    scaleDown: { stabilizationWindowSeconds: 60, policies: [{ type: Pods, value: 1, periodSeconds: 30 }] }
+{{- end }}

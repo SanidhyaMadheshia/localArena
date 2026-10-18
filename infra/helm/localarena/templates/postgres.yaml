@@ -1,0 +1,39 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: arena-db
+  labels: {{- include "la.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep # never delete the database on uninstall
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.image }}
+  primaryUpdateStrategy: unsupervised
+  smartShutdownTimeout: 10
+  affinity: { podAntiAffinityType: required }
+  postgresql:
+    parameters: { log_lock_waits: "on", deadlock_timeout: "200ms", track_io_timing: "on", max_connections: "100" }
+  bootstrap: { initdb: { database: localarena, owner: localarena } }
+  storage: { size: {{ .Values.postgres.storage }} }
+  resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: arena-db-pooler-rw
+  labels: {{- include "la.labels" . | nindent 4 }}
+spec:
+  cluster: { name: arena-db }
+  instances: {{ .Values.postgres.poolerInstances }}
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters: { default_pool_size: "10", max_client_conn: "500", max_prepared_statements: "200", query_wait_timeout: "5", server_login_retry: "1" }
+  template:
+    spec:
+      topologySpreadConstraints:
+        - { maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor,
+            labelSelector: { matchLabels: { cnpg.io/poolerName: arena-db-pooler-rw } }, matchLabelKeys: [pod-template-hash] }
+      containers:
+        - name: pgbouncer
+          resources: { requests: { cpu: 50m, memory: 32Mi }, limits: { memory: 128Mi } }

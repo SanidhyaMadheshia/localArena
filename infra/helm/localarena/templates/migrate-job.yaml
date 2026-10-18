@@ -1,0 +1,45 @@
+{{- if .Values.migrate.enabled }}
+# Pre-install/pre-upgrade hook: migrations finish before new pods start
+# (expand/contract, adr/0005). A failure fails the release; with --atomic /
+# Argo CD the previous revision stays live (adr/0019).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-{{ .Release.Revision }}
+  labels: {{- include "la.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: PreSync
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      {{- include "la.podSecurity" . | nindent 6 }}
+      initContainers: # first install: wait for the CNPG cluster and its app secret
+        - name: wait-db
+          image: {{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          command: ["/migrate", "version"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: arena-db-app, key: uri } }
+          {{- include "la.containerSecurity" . | nindent 10 }}
+      containers:
+        - name: migrate
+          image: {{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          command: ["/migrate", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: arena-db-app, key: uri } }
+            {{- if .Values.migrate.failForDrill }}
+            - name: MIGRATE_FAIL_FOR_DRILL
+              value: "1"
+            {{- end }}
+          {{- include "la.containerSecurity" . | nindent 10 }}
+          resources: { requests: { cpu: 50m, memory: 32Mi }, limits: { memory: 64Mi } }
+{{- end }}

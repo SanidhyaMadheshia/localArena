@@ -1,0 +1,135 @@
+# CI for LocalArena (adr/0020). Every push/PR: Go lint+race+integration tests
+# against service containers, Kafka Streams tests, OPA and alert-rule tests,
+# Helm/OpenTofu validation, schema compatibility, security scans, and cached
+# image builds. Pushes to main also publish images to GHCR tagged by SHA.
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env: { POSTGRES_USER: localarena, POSTGRES_PASSWORD: localarena-dev, POSTGRES_DB: localarena }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U localarena" --health-interval 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.0.6-alpine
+        ports: ["6380:6379"]
+      opa:
+        image: openpolicyagent/opa:1.21.2
+        ports: ["8181:8181"]
+    env:
+      LOCALARENA_TEST_DATABASE_URL: postgres://localarena:localarena-dev@localhost:5432/localarena
+      LOCALARENA_TEST_VALKEY_ADDR: localhost:6380
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.27.2", cache-dependency-path: backend/go.sum }
+      - name: load OPA policy into the service container
+        run: curl -sf -X PUT --data-binary @policies/localarena.rego localhost:8181/v1/policies/localarena
+      - name: vet + gofmt
+        working-directory: backend
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+      - uses: golangci/golangci-lint-action@v8
+        with: { version: v2.15.0, working-directory: backend }
+      - name: test (race, integration)
+        working-directory: backend
+        env: { LOCALARENA_TEST_OPA_URL: "http://localhost:8181" }
+        run: go test -race -count=1 -p 1 ./...
+      - name: govulncheck
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: gosec
+        working-directory: backend
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude-generated -exclude=G404 ./...
+
+  streams:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "21", cache: gradle }
+      - working-directory: streams
+        run: ./gradlew test --no-daemon
+
+  policy-and-config:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: opa test
+        run: docker run --rm -v "$PWD/policies:/p:ro" openpolicyagent/opa:1.21.2-static test /p -v
+      - name: alert rules (promtool)
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/infra/observability:/o" prom/prometheus:v3.13.4 check rules /o/rules/slo.yml
+          docker run --rm --entrypoint promtool -v "$PWD/infra/observability:/o" -w /o/rules-tests prom/prometheus:v3.13.4 test rules slo_test.yml
+      - uses: azure/setup-helm@v4
+        with: { version: v4.3.1 }
+      - name: helm lint + template
+        run: |
+          helm lint infra/helm/localarena -f infra/helm/localarena/values-dev.yaml
+          helm template la infra/helm/localarena -f infra/helm/localarena/values-dev.yaml --set api.canary.enabled=true > /dev/null
+      - uses: opentofu/setup-opentofu@v1
+        with: { tofu_version: 1.13.1 }
+      - name: tofu fmt + validate
+        working-directory: infra/opentofu
+        run: |
+          tofu fmt -check -recursive
+          tofu init -backend=false -input=false
+          tofu validate
+      - name: schema compatibility (Apicurio, BACKWARD_TRANSITIVE)
+        run: |
+          docker run -d --name apicurio -p 8086:8080 apicurio/apicurio-registry:3.3.3
+          for _ in $(seq 60); do curl -sf localhost:8086/apis/registry/v3/system/info >/dev/null && break; sleep 2; done
+          git show "origin/main:schemas/localarena/events/v1/events.proto" > /tmp/base.proto 2>/dev/null || cp schemas/localarena/events/v1/events.proto /tmp/base.proto
+          cp schemas/localarena/events/v1/events.proto /tmp/head.proto
+          cp /tmp/base.proto schemas/localarena/events/v1/events.proto && scripts/register-schemas.sh
+          scripts/register-schemas.sh --check /tmp/head.proto
+      - name: trivy config + secrets
+        uses: aquasecurity/trivy-action@0.33.1
+        with: { scan-type: fs, scanners: "misconfig,secret", severity: "HIGH,CRITICAL", exit-code: "1", skip-dirs: experiments }
+
+  images:
+    needs: [go, streams, policy-and-config]
+    runs-on: ubuntu-24.04
+    permissions: { contents: read, packages: write }
+    strategy:
+      matrix:
+        include:
+          - { name: api, file: Dockerfile, target: api }
+          - { name: gameserver, file: Dockerfile, target: gameserver }
+          - { name: streams, file: streams/Dockerfile, target: "" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - name: build (layer cache in GitHub Actions cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name != 'push' }}
+          tags: ghcr.io/${{ github.repository_owner }}/localarena-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: trivy image (HIGH/CRITICAL fail)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/localarena-${{ matrix.name }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true

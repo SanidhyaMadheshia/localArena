@@ -39,6 +39,7 @@ func main() {
 		brokers   = flag.String("kafka", env("KAFKA_BROKERS", ""), "comma-separated Kafka brokers; empty disables events")
 		spoolDir  = flag.String("spool-dir", env("EVENT_SPOOL_DIR", ""), "durable event spool directory (used while Kafka is unavailable)")
 		roundSecs = flag.Int("round-seconds", 120, "match round length; each round ends with MatchCompleted")
+		drainFor  = flag.Duration("drain-timeout", 0, "on SIGTERM, wait up to this long for players to leave (0 = round length + 10s)")
 		guests    = flag.Bool("allow-guests", env("ALLOW_GUESTS", "") == "1", "with GAME_TICKET_SECRET set, still accept anonymous guests")
 	)
 	flag.Parse()
@@ -116,7 +117,16 @@ func main() {
 		os.Exit(1)
 	case <-ctx.Done():
 	}
-	log.Info("shutting down")
+	// Graceful drain (adr/0018): fail readiness, refuse joins, let rounds finish.
+	dt := *drainFor
+	if dt == 0 {
+		dt = time.Duration(*roundSecs)*time.Second + 10*time.Second
+	}
+	log.Info("draining", "timeout", dt)
+	dctx, dcancel := context.WithTimeout(context.Background(), dt)
+	left := mgr.Drain(dctx)
+	dcancel()
+	log.Info("shutting down", "players_still_connected", left)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// Stop accepting connections, then end matches; that closes every WebSocket

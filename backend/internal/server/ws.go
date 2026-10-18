@@ -86,6 +86,12 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	} else {
 		span.SetStatus(codes.Error, err.Error())
 	}
+	if errors.Is(err, match.ErrDraining) {
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "server draining"), time.Now().Add(writeWait))
+		_ = conn.Close()
+		return
+	}
 	if errors.Is(err, match.ErrAlreadyPlaying) {
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "already connected"), time.Now().Add(writeWait))
