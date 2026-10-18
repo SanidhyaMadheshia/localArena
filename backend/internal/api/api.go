@@ -61,6 +61,8 @@ type Options struct {
 	PurchaseRL  ratelimit.Rule
 	CreateRL    ratelimit.Rule
 	PresenceTTL time.Duration
+	// StreamsURL is a Kafka Streams instance serving /top (leaderboard). Optional.
+	StreamsURL string
 }
 
 // Server holds dependencies.

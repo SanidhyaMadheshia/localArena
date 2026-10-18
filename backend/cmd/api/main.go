@@ -87,7 +87,7 @@ func run(log *slog.Logger) error {
 	ttl, _ := time.ParseDuration(os.Getenv("PROFILE_TTL")) // 0 -> default
 	delay, _ := time.ParseDuration(os.Getenv("PROFILE_LOAD_DELAY"))
 	opts := api.Options{Cache: c, ProfileTTL: ttl, ProfileLoadDelay: delay, TrustProxy: os.Getenv("TRUST_PROXY") == "1",
-		LegacyV1: os.Getenv("LEGACY_V1") == "1"}
+		LegacyV1: os.Getenv("LEGACY_V1") == "1", StreamsURL: os.Getenv("STREAMS_URL")}
 	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
 		jwks := os.Getenv("OIDC_JWKS_URL")
 		if jwks == "" {

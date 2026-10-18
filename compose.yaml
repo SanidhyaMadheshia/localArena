@@ -53,6 +53,7 @@ services:
       EVENT_SPOOL_DIR: /var/lib/gameserver/spool
       ALLOW_GUESTS: ${ALLOW_GUESTS:-1} # bots play as guests; set 0 to require game tickets
       TRUST_PLAYER_PARAM: ${TRUST_PLAYER_PARAM:-1} # LAB: bots -accounts play as accounts without tickets; 0 for a secure stack
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-localhost:5173} # Vite dev server (web/) may open the WebSocket
       FLAGD_URL: http://flagd:8016
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4317}
       OTEL_EXPORTER_OTLP_INSECURE: "true"
@@ -142,6 +143,7 @@ services:
       OIDC_ISSUER: http://localhost:8180/realms/localarena
       OIDC_JWKS_URL: http://keycloak:8180/realms/localarena/protocol/openid-connect/certs
       OPA_URL: http://opa:8181
+      STREAMS_URL: http://streams-1:7070 # /v2/leaderboard (optional; 503 when the streaming profile is down)
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4317}
       OTEL_EXPORTER_OTLP_INSECURE: "true"
       LEGACY_V1: ${LEGACY_V1:-1} # unauthenticated /v1 kept for bots/k6 experiments; set 0 for a secure stack

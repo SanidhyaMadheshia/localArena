@@ -15,6 +15,7 @@ The source decisions are in [`../adr/`](../adr), the evidence in [`../experiment
 
 ## Start here
 
+0. [Getting started](../GETTING_STARTED.md): run, play, test, develop and launch.
 1. [Architecture overview (HLD)](00-architecture.md): the whole system, data flows, and request lifecycles.
 2. [Concept glossary](concepts/glossary.md): every concept, A-Z, each linked to the doc that uses it.
 3. [Final report](../FINAL_REPORT.md): what failed, why, and what changed.

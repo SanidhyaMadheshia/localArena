@@ -2,30 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
   <title>LocalArena</title>
-  <style>
-    body { margin: 0; font: 14px system-ui, sans-serif; background: #111; color: #eee; display: flex; gap: 16px; padding: 16px; }
-    canvas { background: #1d2330; border: 1px solid #333; width: min(80vh, 70vw); aspect-ratio: 1; }
-    aside { min-width: 220px; }
-    ol { padding-left: 20px; }
-    .me { color: #4fc3f7; font-weight: 600; }
-    #status[data-state="closed"] { color: #ef5350; }
-  </style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath d=%22M8 1l6 7-6 7-6-7z%22 fill=%22%23ffd54f%22/%3E%3C/svg%3E">
 </head>
 <body>
-  <canvas id="arena" width="1000" height="1000" aria-label="Arena: players are circles, items are yellow squares. Move with arrow keys or WASD."></canvas>
-  <aside>
-    <h1>LocalArena</h1>
-    <p id="status" role="status" aria-live="polite">connecting…</p>
-    <p>Move: WASD / arrow keys</p>
-    <dl>
-      <dt>Tick</dt><dd id="tick">-</dd>
-      <dt>Input RTT</dt><dd id="rtt">-</dd>
-    </dl>
-    <h2>Scores</h2>
-    <ol id="scores"></ol>
-  </aside>
-  <script type="module" src="dist/main.js"></script>
+  <a class="skip" href="#panel">Skip to account and shop</a>
+  <main id="app">
+    <div id="stage" role="img" aria-label="3D arena. Collect the golden gems to score. Move with WASD or the arrow keys; on touch screens use the joystick."></div>
+
+    <header class="hud" aria-label="Match status">
+      <span id="conn" class="pill" data-state="connecting" role="status" aria-live="polite">connecting…</span>
+      <span class="pill">mode <b id="mode">-</b></span>
+      <span class="pill">RTT <b id="rtt">-</b></span>
+      <span class="pill">tick <b id="tick">-</b></span>
+      <span class="pill">players <b id="count">-</b></span>
+    </header>
+
+    <section class="scores" aria-labelledby="scores-h">
+      <h2 id="scores-h">This match</h2>
+      <ol id="scores"></ol>
+    </section>
+
+    <button id="toggle" class="toggle" aria-expanded="true" aria-controls="panel" title="Toggle panel (P)">☰</button>
+
+    <aside id="panel" tabindex="-1">
+      <section aria-labelledby="acct-h">
+        <h2 id="acct-h">Account</h2>
+        <div id="guest">
+          <p>Playing as a <b>guest</b>. Sign in to earn credits, buy cosmetics and appear on the leaderboard.</p>
+          <button id="login" class="primary">Sign in</button>
+          <p class="hint">Dev users: <code>alice</code> / <code>alice-dev-password</code>, <code>bob</code> / <code>bob-dev-password</code></p>
+        </div>
+        <div id="account" hidden>
+          <p><b id="who"></b> <span id="roles" class="muted"></span></p>
+          <p id="banned" class="warn" hidden>This account is banned.</p>
+          <p>Credits: <b id="credits">0</b></p>
+          <p>Owned: <span id="items" class="muted">nothing yet</span></p>
+          <form id="rename">
+            <label for="name">Display name</label>
+            <div class="row"><input id="name" maxlength="32" autocomplete="nickname" required><button>Save</button></div>
+          </form>
+          <button id="logout">Sign out</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="shop-h">
+        <h2 id="shop-h">Shop</h2>
+        <ul id="shop" class="list"></ul>
+      </section>
+
+      <section aria-labelledby="lb-h">
+        <h2 id="lb-h">Leaderboard</h2>
+        <ol id="leaderboard" class="list"></ol>
+        <p id="lb-note" class="muted"></p>
+      </section>
+
+      <p class="hint">WASD / arrows to move · mouse wheel to zoom · P toggles this panel</p>
+    </aside>
+
+    <div id="joystick" aria-hidden="true"><div class="knob"></div></div>
+    <div id="toasts" role="alert" aria-live="assertive"></div>
+    <div id="nogl" class="nogl" hidden>Your browser has WebGL 2 disabled. Enable hardware acceleration to play.</div>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

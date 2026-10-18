@@ -129,3 +129,26 @@ func (s *Store) ReplicaLag(ctx context.Context) (time.Duration, error) {
 		`SELECT coalesce(extract(epoch FROM now() - pg_last_xact_replay_timestamp()), 0)`).Scan(&secs)
 	return time.Duration(secs * float64(time.Second)), err
 }
+
+// DisplayNames returns display names for the given players (missing ids are
+// absent from the map). Read from the replica: names are decoration.
+func (s *Store) DisplayNames(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.Replica.Query(ctx, `SELECT player_id, display_name FROM profiles WHERE player_id = ANY($1)`, ids)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return out, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}

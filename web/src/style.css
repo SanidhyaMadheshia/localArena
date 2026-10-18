@@ -1,0 +1,68 @@
+:root {
+  --bg: #0b1020; --panel: rgb(17 23 44 / 88%); --line: #2b3765; --text: #e8ecff; --muted: #9aa6d6;
+  --accent: #4fc3f7; --gold: #ffd54f; --bad: #ef5350; --ok: #66bb6a;
+  font: 14px/1.4 system-ui, sans-serif; color: var(--text); background: var(--bg);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+#app { position: fixed; inset: 0; }
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; }
+.labels { position: absolute; inset: 0; pointer-events: none; }
+.label { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: rgb(0 0 0 / 55%); white-space: nowrap; }
+.label.me { color: var(--accent); font-weight: 700; }
+.popup { color: var(--gold); font-weight: 800; font-size: 18px; text-shadow: 0 1px 3px #000; }
+
+.hud { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 380px); }
+.pill { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+.pill[data-state="open"] { color: var(--ok); }
+.pill[data-state="closed"], .pill[data-state="unsupported"] { color: var(--bad); }
+
+.scores { position: absolute; left: 12px; top: 56px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; min-width: 180px; }
+.scores h2, aside h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 6px 0; }
+.scores ol { margin: 0; padding-left: 20px; }
+.me { color: var(--accent); font-weight: 700; }
+
+aside { position: absolute; top: 12px; right: 12px; bottom: 12px; width: 340px; overflow: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 16px; backdrop-filter: blur(6px); }
+aside[hidden] { display: none; }
+aside section { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.toggle { position: absolute; top: 12px; right: 364px; z-index: 2; }
+aside[hidden] ~ .toggle, .toggle[aria-expanded="false"] { right: 12px; }
+.list { list-style: none; padding: 0; margin: 0; }
+.list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid rgb(255 255 255 / 5%); }
+ol.list { counter-reset: n; }
+ol.list li::before { counter-increment: n; content: counter(n) "."; color: var(--muted); width: 1.6em; }
+ol.list li span:first-of-type { flex: 1; }
+.muted, .hint { color: var(--muted); }
+.hint { font-size: 12px; }
+.warn { color: var(--bad); font-weight: 700; }
+.row { display: flex; gap: 6px; }
+label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+input { flex: 1; min-width: 0; background: #0e1430; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+button { background: #24305e; color: var(--text); border: 1px solid #3b4a8a; border-radius: 8px; padding: 6px 12px; cursor: pointer; font: inherit; }
+button:hover:not(:disabled) { background: #2f3d78; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); color: #062033; border-color: var(--accent); font-weight: 700; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.skip { position: absolute; left: -999px; top: 8px; z-index: 10; background: #000; color: #fff; padding: 6px; }
+.skip:focus { left: 8px; }
+
+#toasts { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: grid; gap: 6px; z-index: 5; }
+.toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 14px; }
+.toast.bad { border-left-color: var(--bad); }
+.toast.ok { border-left-color: var(--ok); }
+
+#joystick { position: absolute; left: 24px; bottom: 24px; width: 120px; height: 120px; border-radius: 50%;
+  background: rgb(255 255 255 / 8%); border: 2px solid rgb(255 255 255 / 20%); display: none; touch-action: none; }
+#joystick .knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgb(79 195 247 / 60%); }
+@media (pointer: coarse) { #joystick { display: block; } }
+@media (max-width: 760px) {
+  aside { top: auto; height: 45%; width: auto; left: 12px; }
+  .toggle { right: 12px; top: 12px; }
+  .hud { max-width: calc(100% - 70px); }
+  .scores { display: none; }
+}
+[hidden] { display: none !important; }
+.nogl { position: absolute; inset: 0; display: grid; place-items: center; font-size: 18px; background: var(--bg); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

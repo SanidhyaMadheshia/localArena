@@ -1,5 +1,7 @@
 # LocalArena: 8-Week Multiplayer Backend and System Design Plan
 
+> **Run it:** [GETTING_STARTED.md](GETTING_STARTED.md) (`make play`, then http://localhost:8080). **Study it:** [docs/](docs/README.md). **Results:** [FINAL_REPORT.md](FINAL_REPORT.md).
+
 ## 1. Mission
 
 Build **LocalArena**, a locally hosted, server-authoritative 2D multiplayer arena, while learning the 111 backend/system-design topics in the accompanying curriculum. Everything runs on one Linux computer using open-source software; no cloud account is required.

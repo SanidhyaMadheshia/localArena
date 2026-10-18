@@ -1,13 +1,33 @@
 GO_IMAGE := golang:1.27.2-alpine
 BACKEND  := backend
 
-.PHONY: build web test itest race lint vuln bench run bots up down logs db-up k8s-cluster k8s-up k8s-status experiment-002
+.PHONY: web-dev web-smoke play play-down build web test itest race lint vuln bench run bots up down logs db-up k8s-cluster k8s-up k8s-status experiment-002
 
 build: web
 	cd $(BACKEND) && go build -o ../bin/ ./cmd/...
 
 web:
 	cd web && npm ci --silent && npm run build
+
+# Frontend dev server on http://localhost:5173 (hot reload; proxies /ws to :8080).
+web-dev:
+	cd web && npm ci --silent && npm run dev
+
+# Everything needed to play with accounts, shop and leaderboard (about 3 GB RAM).
+play: secrets certs
+	docker compose --profile streaming up -d --wait kafka-1 kafka-2 kafka-3
+	scripts/kafka-topics.sh
+	docker compose --profile security --profile streaming up -d --build --wait
+	scripts/register-schemas.sh
+	scripts/connect.sh
+	@echo "open http://localhost:8080  (users: alice/alice-dev-password, bob/bob-dev-password)"
+
+# Headless-browser smoke test of the running stack (guest play, login, purchase).
+web-smoke:
+	cd web && npm ci --silent && node e2e/smoke.mjs
+
+play-down:
+	docker compose --profile security --profile streaming --profile observability --profile regions --profile shards --profile load down
 
 test:
 	cd $(BACKEND) && go vet ./... && go test -count=1 ./...

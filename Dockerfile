@@ -5,7 +5,7 @@ FROM node:24.13.0-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
-COPY web/tsconfig.json web/index.html ./
+COPY web/tsconfig.json web/vite.config.ts web/index.html ./
 COPY web/src ./src
 RUN npm run build
 
@@ -23,8 +23,7 @@ USER 65532:65532
 COPY --from=build /out/gameserver /gameserver
 # Spool directory owned by the nonroot user (uid 65532); a named volume inherits it.
 COPY --from=build --chown=65532:65532 /out/empty /var/lib/gameserver/spool
-COPY --from=web /web/index.html /web/
-COPY --from=web /web/dist /web/dist
+COPY --from=web /web/dist /web
 ENV WEB_DIR=/web ADDR=:8080
 EXPOSE 8080
 ENTRYPOINT ["/gameserver"]

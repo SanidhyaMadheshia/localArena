@@ -37,12 +37,14 @@ func (s *Server) registerV2(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v2/players/{id}", s.getProfile) // public view
 	mux.HandleFunc("GET /v2/players/{id}/avatar", s.serveAvatar)
 	mux.HandleFunc("GET /v2/cosmetics", s.listCosmetics)
+	mux.HandleFunc("GET /v2/leaderboard", s.leaderboard)
 	mux.HandleFunc("POST /v2/webhooks/match-results", s.matchResultWebhook) // HMAC-authenticated, not bearer
 	mux.HandleFunc("OPTIONS /v2/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 }
 
 // AllowedOrigins may call /v2 from a browser (CORS).
-var AllowedOrigins = map[string]bool{"http://localhost:8080": true, "https://localhost:8443": true}
+// localhost:5173 is the Vite dev server (web/).
+var AllowedOrigins = map[string]bool{"http://localhost:8080": true, "https://localhost:8443": true, "http://localhost:5173": true}
 
 // securityHeaders applies to every response. The API only returns JSON or
 // images, so the CSP forbids everything; nosniff stops a browser from

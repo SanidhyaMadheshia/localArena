@@ -3,10 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p .",
-    "watch": "tsc -p . --watch"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "oidc-client-ts": "3.5.0",
+    "three": "0.186.1"
   },
   "devDependencies": {
-    "typescript": "7.0.2"
+    "@types/three": "0.186.0",
+    "playwright-core": "1.58.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
   }
 }

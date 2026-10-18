@@ -23,8 +23,8 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": ["http://localhost:8080/*", "https://localhost:8443/*"],
-      "webOrigins": ["http://localhost:8080", "https://localhost:8443"],
+      "redirectUris": ["http://localhost:8080/*", "https://localhost:8443/*", "http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:8080", "https://localhost:8443", "http://localhost:5173"],
       "attributes": { "pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+" },
       "protocolMappers": [
         {
