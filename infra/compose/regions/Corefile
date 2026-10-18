@@ -1,0 +1,13 @@
+# Global DNS for the two simulated regions (adr/0021). play.localarena.test is
+# the player entry point; editing the zone file is the "traffic manager"
+# failover. TTL is set per record in the zone (30 s); `reload` picks up edits.
+localarena.test:53 {
+    file /etc/coredns/localarena.test.db
+    reload 2s
+    log
+    errors
+}
+.:53 {
+    forward . 127.0.0.11
+    cache 30
+}

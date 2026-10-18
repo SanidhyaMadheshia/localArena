@@ -1,0 +1,5 @@
+partition B<->A: region B read HTTP 200 in 35 ms
+  region B write HTTP 503 in 53 ms (503 within the 3 s budget, not a hang)
+  region B gameplay unaffected: {"connects":5,"connect_failures":0,"rtt_p50":48.91}
+  region A unaffected: write HTTP 201
+healed: region B write HTTP 201

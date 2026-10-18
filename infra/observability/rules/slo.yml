@@ -100,6 +100,20 @@ groups:
         annotations:
           summary: "PgBouncer has {{ $value }} clients waiting and no active server connections (paused or DB unreachable)"
           runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/postgres.md
+      - alert: LocalArenaConsumerLagGrowing # PM-002: Streams/rewards stopped with no page
+        expr: sum by (consumergroup) (kafka_consumergroup_lag{consumergroup=~"localarena-.*"}) > 500 and sum by (consumergroup) (deriv(kafka_consumergroup_lag{consumergroup=~"localarena-.*"}[2m])) > 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "Consumer group {{ $labels.consumergroup }} lag {{ $value }} and growing (processor down or stuck)"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/event-pipeline.md
+      - alert: LocalArenaNoRewardsGranted # PM-002: matches complete but nobody is rewarded
+        expr: sum(increase(localarena_events_total{class="durable",result="delivered"}[15m])) > 100 and (sum(increase(localarena_rewards_outcomes_total{outcome="granted"}[15m])) or vector(0)) == 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Gameplay events are flowing but no rewards were granted in 15 m"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/event-pipeline.md
       - alert: LocalArenaDBPoolSaturated
         expr: max(localarena_db_pool_acquired_conns / localarena_db_pool_max_conns) > 0.9
         for: 1m

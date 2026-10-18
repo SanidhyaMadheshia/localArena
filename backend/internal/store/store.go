@@ -11,8 +11,11 @@ package store
 import (
 	"context"
 	"errors"
+	"io"
 	"math/rand/v2"
+	"net"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/exaring/otelpgx"
@@ -170,6 +173,16 @@ func (s *Store) inTxOpts(ctx context.Context, opts pgx.TxOptions, fn func(pgx.Tx
 func IsUnavailable(err error) bool {
 	var ce *pgconn.ConnectError
 	if errors.As(err, &ce) {
+		return true
+	}
+	// A pooled connection dying mid-query (network partition, failover) surfaces
+	// as EOF / connection reset, not as a SQLSTATE (Experiment 008).
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EPIPE) || pgconn.SafeToRetry(err) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
 		return true
 	}
 	switch c := pgCode(err); {

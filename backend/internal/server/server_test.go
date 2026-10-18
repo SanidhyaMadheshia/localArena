@@ -279,3 +279,25 @@ func TestWebSocketTickets(t *testing.T) {
 		t.Fatalf("welcome %+v %v", w, err)
 	}
 }
+
+// With tickets on, ?player= is ignored unless the lab flag is set (game-day finding).
+func TestPlayerParamOnlyWithLabFlag(t *testing.T) {
+	tk, _ := auth.NewTickets([]byte("0123456789abcdef0123456789abcdef"))
+	for _, trust := range []bool{false, true} {
+		mgr := match.NewManager(match.Options{TickHz: 50})
+		ts := httptest.NewServer(New(mgr, slog.New(slog.DiscardHandler), Config{Tickets: tk, AllowGuests: true, TrustPlayerParam: trust}).Handler())
+		c, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws?player=42", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var w protocol.Welcome
+		_ = c.ReadJSON(&w)
+		_ = c.Close()
+		mgr.Close()
+		ts.CloseClientConnections()
+		ts.Close()
+		if trust != (w.ID == 42) {
+			t.Fatalf("trust=%v: joined as %d", trust, w.ID)
+		}
+	}
+}

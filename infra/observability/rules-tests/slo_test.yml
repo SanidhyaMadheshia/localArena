@@ -69,3 +69,16 @@ tests:
             exp_annotations:
               summary: "PgBouncer has 30 clients waiting and no active server connections (paused or DB unreachable)"
               runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/postgres.md
+  - name: stopped stream processor pages on growing lag  # PM-002
+    interval: 30s
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="localarena-streams",topic="game.match-events.v1",partition="0"}'
+        values: '0+100x20'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: LocalArenaConsumerLagGrowing
+        exp_alerts:
+          - exp_labels: { severity: page, consumergroup: localarena-streams }
+            exp_annotations:
+              summary: "Consumer group localarena-streams lag 1800 and growing (processor down or stuck)"
+              runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/event-pipeline.md

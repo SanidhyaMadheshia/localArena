@@ -1,0 +1,8 @@
+[
+  { "name": "player-to-a-game", "listen": "0.0.0.0:21080", "upstream": "gameserver:8080", "enabled": true },
+  { "name": "player-to-a-api",  "listen": "0.0.0.0:21081", "upstream": "envoy:10000",     "enabled": true },
+  { "name": "player-to-b-game", "listen": "0.0.0.0:22080", "upstream": "gameserver-b:8080", "enabled": true },
+  { "name": "player-to-b-api",  "listen": "0.0.0.0:22081", "upstream": "api-b:8081",      "enabled": true },
+  { "name": "b-to-a-postgres",  "listen": "0.0.0.0:25432", "upstream": "pgbouncer:5432",  "enabled": true },
+  { "name": "b-to-a-replica",   "listen": "0.0.0.0:25433", "upstream": "postgres-replica:5432", "enabled": true }
+]

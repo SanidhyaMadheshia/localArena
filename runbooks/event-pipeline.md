@@ -10,6 +10,10 @@
 3. Consumer lag: `kafka-consumer-groups.sh --describe --group localarena-streams` / `localarena-rewards-saga`.
 4. DLQs: `bin/eventcat -topic game.reward-commands-dlq.v1,game.invalid-events.v1 -from-start -idle 3s`.
 
+5. `LocalArenaConsumerLagGrowing`: which group? `localarena-streams` → `curl :7071/healthz :7072/healthz`, `docker compose ps streams-1 streams-2`;
+   `localarena-rewards-*` → `docker compose ps rewards`. Restart the processor; it resumes from committed offsets (Streams: state from local RocksDB or changelog).
+6. `LocalArenaNoRewardsGranted`: are players accounts? Guests (id ≥ 1e9) earn nothing (PM-002: `?player=` ignored once tickets are on, unless `TRUST_PLAYER_PARAM=1`).
+
 ## Mitigate
 - Restore brokers; the spool drains automatically (`replayed` counter rises, spool returns to 0). No manual replay.
 - Spool full (`dropped_spool_full`): raise `MaxSpoolBytes` or free disk; events beyond the cap are lost: record the window for the postmortem.

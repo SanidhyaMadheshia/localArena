@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,7 +82,17 @@ func main() {
 	flag.DurationVar(&c.churn, "churn", 0, "mean session lifetime before reconnect; 0 disables")
 	flag.BoolVar(&c.jsonOut, "json", false, "print the report as JSON")
 	flag.IntVar(&c.accountBase, "accounts", 0, "if >0, bot i plays as account accountBase+i (?player=); else guests")
+	servers := flag.String("servers", "", "comma-separated region game servers; each bot picks the lowest-RTT healthy one (region selection, adr/0021)")
 	flag.Parse()
+	if *servers != "" {
+		best, rtts := pickRegion(strings.Split(*servers, ","))
+		fmt.Fprintf(os.Stderr, "region RTTs: %v -> %s\n", rtts, best)
+		if best == "" {
+			fmt.Fprintln(os.Stderr, "no healthy region")
+			os.Exit(1)
+		}
+		c.server = best
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -359,3 +370,33 @@ func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 // scrapeClient is a short-timeout client for /metrics.
 var scrapeClient = &http.Client{Timeout: 5 * time.Second}
+
+// pickRegion probes /healthz of each candidate 3 times and returns the one with
+// the lowest median RTT; unreachable regions are skipped (client-side region
+// selection, as a game client would do with ping beacons).
+func pickRegion(cands []string) (string, map[string]time.Duration) {
+	cl := &http.Client{Timeout: time.Second}
+	out := map[string]time.Duration{}
+	best, bestRTT := "", time.Duration(1<<62)
+	for _, c := range cands {
+		var samples []time.Duration
+		for range 3 {
+			t := time.Now()
+			resp, err := cl.Get(c + "/healthz")
+			if err != nil {
+				break
+			}
+			_ = resp.Body.Close()
+			samples = append(samples, time.Since(t))
+		}
+		if len(samples) < 3 {
+			continue
+		}
+		slices.Sort(samples)
+		out[c] = samples[1].Round(time.Millisecond)
+		if samples[1] < bestRTT {
+			best, bestRTT = c, samples[1]
+		}
+	}
+	return best, out
+}

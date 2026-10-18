@@ -39,6 +39,7 @@ func main() {
 		brokers   = flag.String("kafka", env("KAFKA_BROKERS", ""), "comma-separated Kafka brokers; empty disables events")
 		spoolDir  = flag.String("spool-dir", env("EVENT_SPOOL_DIR", ""), "durable event spool directory (used while Kafka is unavailable)")
 		roundSecs = flag.Int("round-seconds", 120, "match round length; each round ends with MatchCompleted")
+		trustPID  = flag.Bool("trust-player-param", env("TRUST_PLAYER_PARAM", "") == "1", "LAB ONLY: accept ?player=<id> without a game ticket")
 		drainFor  = flag.Duration("drain-timeout", 0, "on SIGTERM, wait up to this long for players to leave (0 = round length + 10s)")
 		guests    = flag.Bool("allow-guests", env("ALLOW_GUESTS", "") == "1", "with GAME_TICKET_SECRET set, still accept anonymous guests")
 	)
@@ -87,7 +88,7 @@ func main() {
 		Events: pub, RoundTicks: uint64(max(*roundSecs, 0) * *tickHz)}) // #nosec G115 -- clamped non-negative
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.New(mgr, log, server.Config{WebDir: *webDir, AllowedOrigins: split(*origins), Tickets: tickets, AllowGuests: *guests}).Handler(),
+		Handler:           server.New(mgr, log, server.Config{WebDir: *webDir, AllowedOrigins: split(*origins), Tickets: tickets, AllowGuests: *guests, TrustPlayerParam: *trustPID}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		// Request contexts derive from ctx so long polls and SSE streams end on shutdown.

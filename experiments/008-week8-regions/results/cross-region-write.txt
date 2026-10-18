@@ -1,0 +1,4 @@
+region A POST /v1/players (write): median 35 ms
+region A GET /v1/players/{id} (read, local replica/cache): median 28 ms
+region B POST /v1/players (write): median 805 ms
+region B GET /v1/players/{id} (read, local replica/cache): median 198 ms

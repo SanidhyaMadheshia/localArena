@@ -1,0 +1,8 @@
+# A "client ISP" caching resolver in front of the authoritative server: it
+# honours the record TTL (30 s), so failover is invisible to its clients until
+# the cached answer expires (Experiment 008 DNS TTL drill).
+.:53 {
+    forward . coredns:53
+    cache 300
+    log
+}

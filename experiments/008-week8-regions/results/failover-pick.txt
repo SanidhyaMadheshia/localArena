@@ -1,0 +1,2 @@
+region RTTs: map[http://localhost:21080:22ms http://localhost:22080:39ms] -> http://localhost:21080
+scrape after: Get "http://localhost:21080/metrics": EOF

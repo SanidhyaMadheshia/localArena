@@ -1,0 +1,9 @@
+before: authoritative ttl=30 "region=a port=21080" | resolver ttl=30 "region=a port=21080"
+resolver cache primed: ttl=30 "region=a port=21080"
+failover A->B at t=0 (zone edit + serial bump)
+  t=4s authoritative: "region=a port=21080" | resolver (cached): ttl=24 "region=a port=21080"
+  t=14s authoritative: "region=b port=22080" | resolver (cached): ttl=14 "region=a port=21080"
+  t=23s authoritative: "region=b port=22080" | resolver (cached): ttl=5 "region=a port=21080"
+  t=34s authoritative: "region=b port=22080" | resolver (cached): ttl=30 "region=b port=22080"
+clients behind the caching resolver switched after ~39 s (record TTL 30 s); clients that cache longer (JVM networkaddress.cache.ttl, browsers, OS) are slower still
+restored: ttl=30 "region=b port=22080"

@@ -67,6 +67,10 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		account = engine.PlayerID(id) // #nosec G115 -- range checked above
+	case s.cfg.TrustPlayerParam && q.Get("player") != "":
+		if v, err := strconv.ParseUint(q.Get("player"), 10, 32); err == nil && v > 0 && v < uint64(match.GuestIDBase) {
+			account = engine.PlayerID(v)
+		}
 	case s.cfg.Tickets != nil && !s.cfg.AllowGuests:
 		http.Error(w, "game ticket required", http.StatusUnauthorized)
 		return

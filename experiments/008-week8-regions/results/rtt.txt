@@ -1,0 +1,5 @@
+player -> region A API GET cosmetics: median 29 ms
+player -> region B API GET cosmetics: median 47 ms
+bots region pick: region RTTs: map[http://localhost:21080:22ms http://localhost:22080:49ms] -> http://localhost:21080
+gameplay input RTT in region a: {"n":2000,"p50":49.905,"p95":54.854,"p99":56.038}
+gameplay input RTT in region b: {"n":1933,"p50":50.49,"p95":56.783,"p99":93.556}

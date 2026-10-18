@@ -24,6 +24,10 @@ type Config struct {
 	Tickets *auth.Tickets
 	// AllowGuests keeps anonymous sessions when Tickets is set (bots/experiments).
 	AllowGuests bool
+	// TrustPlayerParam accepts ?player=<id> without a ticket. LAB ONLY: lets
+	// load bots play as accounts (rewards drills). Off by default (game day
+	// finding: account bots had silently become guests once tickets were on).
+	TrustPlayerParam bool
 }
 
 // Server holds HTTP handlers.

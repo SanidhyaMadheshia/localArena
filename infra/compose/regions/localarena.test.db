@@ -1,0 +1,10 @@
+$ORIGIN localarena.test.
+$TTL 30
+@       IN SOA ns.localarena.test. ops.localarena.test. ( 103 60 30 600 30 )
+        IN NS  ns.localarena.test.
+ns      IN A   127.0.0.1
+; Regional endpoints (Toxiproxy listeners, i.e. through the simulated WAN).
+region-a 30 IN CNAME toxiproxy.
+region-b 30 IN CNAME toxiproxy.
+; Player entry point: points at the active region. Failover = repoint + serial bump.
+play     30 IN TXT   "region=a port=21080"

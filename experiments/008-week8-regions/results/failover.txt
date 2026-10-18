@@ -1,0 +1,4 @@
+region A down for players at +8 s
+  bots pinned to A after the outage: {"connects":64,"connect_failures":1549} (reconnects fail: sticky region choice)
+  re-running region selection: region RTTs: map[http://localhost:22080:40ms] -> http://localhost:22080
+  after re-selection: {"connects":20,"connect_failures":0,"rtt_p50":50.852}

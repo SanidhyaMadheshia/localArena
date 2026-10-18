@@ -1,0 +1,5 @@
+recorded a match for player 11136 via region B (write went to A's primary); region B replica replay paused (simulated lag)
+  history read in B (replica):  0 matches  (0 = stale read)
+  history read in A (replica):  0 matches  (same replica in this lab: also stale)
+  after replay resumes, history in B: 1 matches
+  profile reads never go stale here: cache fills read the primary, and X-Read-After-LSN reads wait for/skip a lagging replica (adr/0004, 0008)

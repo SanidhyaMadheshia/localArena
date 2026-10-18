@@ -18,6 +18,8 @@ scrape_configs:
     static_configs: [{ targets: ["rewards:9102"] }]
   - job_name: postgres
     static_configs: [{ targets: ["postgres-exporter:9187"] }]
+  - job_name: kafka
+    static_configs: [{ targets: ["kafka-exporter:9308"] }]
   - job_name: pgbouncer
     static_configs: [{ targets: ["pgbouncer-exporter:9127"] }]
   - job_name: otel-collector

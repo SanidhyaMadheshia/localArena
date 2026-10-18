@@ -52,6 +52,7 @@ services:
       KAFKA_BROKERS: ${GAMESERVER_KAFKA:-kafka-1:19092,kafka-2:19092,kafka-3:19092}
       EVENT_SPOOL_DIR: /var/lib/gameserver/spool
       ALLOW_GUESTS: ${ALLOW_GUESTS:-1} # bots play as guests; set 0 to require game tickets
+      TRUST_PLAYER_PARAM: ${TRUST_PLAYER_PARAM:-1} # LAB: bots -accounts play as accounts without tickets; 0 for a secure stack
       FLAGD_URL: http://flagd:8016
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4317}
       OTEL_EXPORTER_OTLP_INSECURE: "true"
@@ -389,6 +390,47 @@ services:
     deploy: { resources: { limits: { memory: 64M } } }
     restart: unless-stopped
 
+  # ---- Week 8 "regions" profile (adr/0021): a second region on the same host ----
+  # Region A = existing gameserver/api/postgres primary. Region B = gameserver-b +
+  # api-b, which reads its local replica and writes to region A's primary through
+  # Toxiproxy (inter-region latency). Players reach both regions through Toxiproxy.
+  toxiproxy:
+    profiles: ["regions"]
+    image: ghcr.io/shopify/toxiproxy:2.13.0
+    command: ["-host=0.0.0.0", "-config=/etc/toxiproxy.json"]
+    volumes: ["./infra/compose/regions/toxiproxy.json:/etc/toxiproxy.json:ro"]
+    ports: ["127.0.0.1:8474:8474", "21080:21080", "21081:21081", "22080:22080", "22081:22081"]
+  coredns:
+    profiles: ["regions"]
+    image: coredns/coredns:1.14.7
+    command: ["-conf", "/etc/coredns/Corefile"]
+    volumes: ["./infra/compose/regions:/etc/coredns:ro"]
+    ports: ["127.0.0.1:1053:53/udp"]
+  resolver: # caching resolver ("ISP DNS") for the TTL drill
+    profiles: ["regions"]
+    image: coredns/coredns:1.14.7
+    command: ["-conf", "/etc/coredns/Corefile.resolver"]
+    volumes: ["./infra/compose/regions:/etc/coredns:ro"]
+  gameserver-b:
+    profiles: ["regions"]
+    image: localarena/gameserver:dev
+    pull_policy: build
+    environment: { DEBUG_ADDR: "", LOG_LEVEL: info, ALLOW_GUESTS: "1" }
+    command: ["-tick-hz", "20", "-capacity", "20", "-round-seconds", "${ROUND_SECONDS:-120}", "-seed", "1000"]
+    deploy: { resources: { limits: { cpus: "2", memory: 256M } } }
+  api-b:
+    profiles: ["regions"]
+    image: localarena/api:dev
+    pull_policy: build
+    environment:
+      ADDR: ":8081"
+      # Writes cross the WAN to region A's primary (single-writer); reads stay local.
+      DATABASE_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@toxiproxy:25432/localarena
+      REPLICA_URL: postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres-replica:5432/localarena
+      LEGACY_V1: "1"
+      APP_REGION: b
+    deploy: { resources: { limits: { cpus: "1", memory: 256M } } }
+
   pg-shard0:
     <<: *pg
     profiles: ["shards"]
@@ -461,6 +503,11 @@ services:
     environment:
       DATA_SOURCE_NAME: postgresql://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres:5432/localarena?sslmode=disable
     command: ["--collector.replication", "--collector.replication_slots", "--collector.stat_replication"]
+    deploy: { resources: { limits: { memory: 64M } } }
+  kafka-exporter: # PM-002: consumer-group lag (Streams/rewards stopped = lag grows)
+    profiles: ["observability"]
+    image: danielqsj/kafka-exporter:v1.10.0
+    command: ["--kafka.server=kafka-1:19092", "--kafka.server=kafka-2:19092", "--kafka.server=kafka-3:19092"]
     deploy: { resources: { limits: { memory: 64M } } }
   pgbouncer-exporter: # PM-001: PgBouncer pool state (clients waiting, paused)
     profiles: ["observability"]
