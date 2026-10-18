@@ -113,13 +113,20 @@ func withTimeout(next http.Handler) http.Handler {
 	})
 }
 
+// ready reports whether *this replica* should receive traffic. It fails only
+// while draining. A shared dependency (Postgres, Valkey) being down is not a
+// reason: every replica would fail together, the load balancer would have no
+// endpoints left, and cache-served reads would stop too (Experiment 003,
+// node loss). Dependency state is reported in the body for humans and alerts.
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	if s.draining.Load() {
 		http.Error(w, "draining", http.StatusServiceUnavailable)
 		return
 	}
-	if err := s.st.Primary.Ping(r.Context()); err != nil {
-		http.Error(w, "primary unavailable", http.StatusServiceUnavailable)
+	ctx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
+	defer cancel()
+	if err := s.st.Primary.Ping(ctx); err != nil {
+		_, _ = w.Write([]byte("ready (degraded: primary unavailable)\n"))
 		return
 	}
 	_, _ = w.Write([]byte("ready\n"))

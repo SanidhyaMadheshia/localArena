@@ -234,3 +234,24 @@ func TestAPIWithValkeyDown(t *testing.T) {
 		t.Fatalf("readyz while draining: %d", code)
 	}
 }
+
+// A database outage must not make the replica unready (that would remove every
+// replica from the load balancer at once); only draining does.
+func TestReadyzIgnoresSharedDependencies(t *testing.T) {
+	pool, err := store.NewPool(t.Context(), "postgres://x:y@127.0.0.1:1/none?connect_timeout=1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	srv := api.New(store.New(pool, nil), slog.New(slog.DiscardHandler))
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	cl := client{t, ts.URL}
+	if code, _, _ := cl.do("GET", "/readyz", "", nil); code != 200 {
+		t.Fatalf("readyz with DB down = %d, want 200 (degraded)", code)
+	}
+	srv.Drain()
+	if code, _, _ := cl.do("GET", "/readyz", "", nil); code != 503 {
+		t.Fatalf("readyz while draining = %d", code)
+	}
+}

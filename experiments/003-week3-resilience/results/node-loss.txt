@@ -1,0 +1,9 @@
+primary arena-db-1 on localarena-worker; writer pinned to localarena-worker2
+  on victim node: api-5f58ddf4bb-c7fc7
+  on victim node: arena-db-pooler-rw-ddbf84466-8gl6m
+  on victim node: migrate-ph468
+stopping node container localarena-worker at 1792322572
+new primary arena-db-2 after 55 s
+writes ok=325 failed=53
+write outage: 60 s (from +2 s to +61 s after node stop)
+restarting localarena-worker

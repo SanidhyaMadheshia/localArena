@@ -1,0 +1,12 @@
+# CloudNativePG operator: 2 replicas (leader election), one per node.
+# With a single operator pod, losing the node that hosts both the operator and
+# the primary leaves nobody to promote the replica (Experiment 003 node-loss).
+replicaCount: 2
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    nodeTaintsPolicy: Honor # ignore the tainted control plane; otherwise it is an empty domain and rollouts deadlock
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: cloudnative-pg

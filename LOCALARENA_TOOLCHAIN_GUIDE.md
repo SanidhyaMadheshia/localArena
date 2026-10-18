@@ -87,6 +87,7 @@ Expected nodes:
 ```text
 localarena-control-plane   Ready
 localarena-worker          Ready
+localarena-worker2         Ready
 ```
 
 Check important versions:
@@ -266,7 +267,12 @@ name: localarena
 nodes:
   - role: control-plane
   - role: worker
+  - role: worker
 ```
+
+The project copy is `infra/kubernetes/kind/cluster.yaml` (two workers, so database
+instances and API replicas can be spread across nodes). `make k8s-cluster`
+recreates the cluster from it (destructive).
 
 Create the cluster:
 
@@ -1052,7 +1058,7 @@ kubectl get nodes
 If the kind containers exist but are stopped:
 
 ```bash
-docker start localarena-control-plane localarena-worker
+docker start localarena-control-plane localarena-worker localarena-worker2
 kubectl wait --for=condition=Ready nodes --all --timeout=180s
 ```
 
@@ -1204,4 +1210,4 @@ gosec -version
 govulncheck -version
 ```
 
-A setup is healthy when Docker responds, both kind nodes are Ready, kube-system pods are Running, and every required command resolves from the shell.
+A setup is healthy when Docker responds, all three kind nodes are Ready, kube-system pods are Running, and every required command resolves from the shell.

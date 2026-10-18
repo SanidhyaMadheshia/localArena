@@ -132,6 +132,44 @@ is 2 s.
 | Origin (Garage) stopped | cached object: 200 in 11 ms; uncached object: 504 after the 1 s connect timeout |
 | Warm throughput, 2 MB object, 50 VUs | 120 req/s, about 240 MB/s, p50 416 ms (loopback, k6 on the same host) |
 
+## 6. Node loss on kind (1 control plane + 2 workers; `node-loss.sh`, `results/node-loss.txt`)
+
+`docker stop` of the worker node that hosts the CNPG primary, while a pod on
+the other worker writes through Service `api` at 4/s.
+
+| Run | Topology before the fault | Failed writes | Write outage | Promotion |
+|---|---|---:|---:|---|
+| 1 | CNPG operator (1 replica) on the victim node | 91 / 128 | 137 s, no recovery until the node returned | **never** |
+| 2 | operator ×2, one per node | 37 / 337 | 66 s | +53 s |
+| 3 | + `/readyz` no longer fails on DB loss; but pooler (1 pod) and Valkey on the victim | 73 / 110 | did not recover within the run | +60 s; writes still failing: the only pooler pod sat on the dead node |
+| 4 | operator ×2, pooler ×2, API ×2, each spread one per node | 53 / 378 | **60 s** | +55 s |
+
+- Final timeline: node stop at 0 s → node `NotReady` +46 s (kubelet
+  heartbeat grace) → CNPG `FailingOver` +50 s → promoted about +55 s →
+  writes succeed +61 s. Detection is the floor, not promotion: CNPG reacts
+  within about 4 s of the pod becoming unready. Lowering the controller
+  manager's `node-monitor-grace-period` would shorten this, at the cost of
+  false positives on a slow node.
+- **Single points of failure found by this drill**, each invisible in Compose:
+  1. One operator pod. When it shares a node with the primary, nobody
+     promotes. Fixed with 2 replicas and leader election
+     (`infra/kubernetes/helm/cnpg-values.yaml`).
+  2. One PgBouncer pod. Pods on a lost node stay "Running" until eviction
+     (default 300 s), so the `-rw` Service keeps sending traffic there.
+     Fixed with 2 pooler instances, one per node.
+  3. `ScheduleAnyway` spread put both API pods on the same node, and a
+     rollout counted the old ReplicaSet. Fixed with `DoNotSchedule`,
+     `nodeTaintsPolicy: Honor` (the tainted control plane otherwise acts as
+     an empty domain and deadlocks rollouts), and
+     `matchLabelKeys: [pod-template-hash]`.
+  4. `/readyz` checked the primary. During failover, every API replica went
+     unready at once, removing all endpoints even for cache-served reads.
+     Readiness now reflects only this replica (draining); DB state is
+     reported as "degraded" (`TestReadyzIgnoresSharedDependencies`).
+- Valkey is still a single pod. Losing its node costs caching and presence
+  until it is rescheduled (about 5 min with default eviction), but no
+  durable data (degradation per ADR-0008).
+
 ## Remaining risks / carried forward
 
 - Per-process singleflight still allows N replicas × 1 load per key. A
@@ -144,5 +182,5 @@ is 2 s.
   Hedging (`hedge_on_per_try_timeout`) is a possible follow-up for GETs.
 - The k6 load generator, Envoy, and the services share CPUs. Absolute
   throughput is not a capacity claim.
-- Node-level failure (losing a whole Kubernetes node) is measured
-  separately on the 2-worker kind cluster.
+- Node-loss write outage is about 60 s, dominated by node failure detection.
+  RPO was not measured (async replication; week 6 DR drill).

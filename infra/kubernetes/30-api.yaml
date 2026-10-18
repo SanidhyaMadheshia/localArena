@@ -16,6 +16,14 @@ spec:
       labels: { app: api }
     spec:
       securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      terminationGracePeriodSeconds: 20 # > DRAIN_SECONDS + in-flight requests
+      topologySpreadConstraints: # one API replica per worker; ScheduleAnyway put both on one node
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          nodeTaintsPolicy: Honor
+          labelSelector: { matchLabels: { app: api } }
+          matchLabelKeys: [pod-template-hash] # spread each ReplicaSet on its own during rollouts
       containers:
         - name: api
           image: localarena/api:dev
@@ -31,6 +39,10 @@ spec:
               value: "host=arena-db-ro port=5432 dbname=localarena user=localarena password=$(DB_PASSWORD)"
             - name: DB_MAX_CONNS
               value: "10"
+            - name: VALKEY_ADDR
+              value: "valkey:6379"
+            - name: DRAIN_SECONDS
+              value: "5" # endpoints are removed when readiness fails (periodSeconds 5 x 2)
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 5
@@ -52,3 +64,13 @@ metadata:
 spec:
   selector: { app: api }
   ports: [{ name: http, port: 8081, targetPort: http }]
+---
+# Voluntary disruptions (node drain, upgrades) must leave at least one API pod.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: localarena
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: api } }

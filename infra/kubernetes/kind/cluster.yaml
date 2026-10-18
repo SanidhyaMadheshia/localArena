@@ -1,0 +1,10 @@
+# kind cluster for LocalArena: 1 control plane + 2 workers, so the two CNPG
+# instances (and API replicas) land on different nodes and a node loss is a
+# real failover. Create: make k8s-cluster  (destructive if it already exists)
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: localarena
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

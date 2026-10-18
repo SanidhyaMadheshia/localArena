@@ -1,7 +1,7 @@
 GO_IMAGE := golang:1.27.2-alpine
 BACKEND  := backend
 
-.PHONY: build web test itest race lint vuln bench run bots up down logs db-up k8s-up k8s-status experiment-002
+.PHONY: build web test itest race lint vuln bench run bots up down logs db-up k8s-cluster k8s-up k8s-status experiment-002
 
 build: web
 	cd $(BACKEND) && go build -o ../bin/ ./cmd/...
@@ -43,14 +43,20 @@ race:
 		-e LOCALARENA_TEST_VALKEY_ADDR=valkey:6379 \
 		-e CGO_ENABLED=1 $(GO_IMAGE) sh -c 'apk add -q gcc musl-dev && go test -race -count=1 -p 1 ./...'
 
-# Kubernetes (kind-localarena): CloudNativePG operator, cluster + pooler, migrate Job, API.
+# Kubernetes (kind-localarena): CloudNativePG operator, cluster + pooler, Valkey, migrate Job, API.
 CNPG_CHART := 0.29.1
+
+# DESTRUCTIVE: deletes and recreates the kind cluster (1 control plane + 2 workers).
+k8s-cluster:
+	kind delete cluster --name localarena
+	kind create cluster --name localarena --config infra/kubernetes/kind/cluster.yaml --wait 5m
+
 k8s-up:
 	docker compose build api
 	kind load docker-image localarena/api:dev --name localarena
 	helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update >/dev/null
-	helm upgrade --install cnpg cnpg/cloudnative-pg --version $(CNPG_CHART) -n cnpg-system --create-namespace --wait
-	kubectl apply -f infra/kubernetes/00-namespace.yaml -f infra/kubernetes/10-postgres.yaml
+	helm upgrade --install cnpg cnpg/cloudnative-pg --version $(CNPG_CHART) -n cnpg-system --create-namespace --wait -f infra/kubernetes/helm/cnpg-values.yaml
+	kubectl apply -f infra/kubernetes/00-namespace.yaml -f infra/kubernetes/10-postgres.yaml -f infra/kubernetes/15-valkey.yaml
 	kubectl -n localarena wait --for=condition=Ready cluster/arena-db --timeout=5m
 	kubectl -n localarena delete job migrate --ignore-not-found
 	kubectl apply -f infra/kubernetes/20-migrate-job.yaml
@@ -60,7 +66,8 @@ k8s-up:
 	kubectl -n localarena rollout status deploy/api --timeout=3m
 
 k8s-status:
-	kubectl -n localarena get cluster,pooler,pods,svc
+	kubectl get nodes
+	kubectl -n localarena get cluster,pooler,pdb,pods,svc -o wide
 
 # gosec 2.29.0 as released bundles an x/tools that cannot read Go 1.27 export
 # data ("export data version 5"), so it silently skips type-aware rules. It is

@@ -1,0 +1,43 @@
+# Valkey for cache, presence, and rate limits. Disposable by design (adr/0008):
+# no persistence, LRU eviction, single replica. If it dies, the API degrades
+# (Postgres reads, per-replica rate limits) and Kubernetes restarts it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: localarena
+  labels: { app: valkey }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: valkey } }
+  template:
+    metadata:
+      labels: { app: valkey }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.0.6-alpine
+          args: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+          ports: [{ name: valkey, containerPort: 6379 }]
+          readinessProbe:
+            exec: { command: ["valkey-cli", "ping"] }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: valkey }
+            periodSeconds: 10
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: data, mountPath: /data }]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: localarena
+spec:
+  selector: { app: valkey }
+  ports: [{ name: valkey, port: 6379, targetPort: valkey }]
