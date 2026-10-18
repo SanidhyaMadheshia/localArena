@@ -1,0 +1,4 @@
+blue (track=stable, v1) and green (track=green, v2) both running:  2 green:localarena/api:v2 2 stable:localarena/api:v1 
+switched Service to green in .076 s; instant rollback = patch selector back
+switched back to blue (rollback drill)
+requests during cutover + rollback: ok=740 

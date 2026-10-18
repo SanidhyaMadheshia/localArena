@@ -1,0 +1,1 @@
+self-heal: flagd replicas 0 -> 1 after 2 s

@@ -1,0 +1,5 @@
+upgrade with a failing migration: level=WARN msg="upgrade failed" name=localarena error="pre-upgrade hooks failed: resource Job/localarena/migrate-25 not ready. status: Failed, message: Job Failed. failed: 2/1" Error: UPGRADE FAILED: 
+  took 16 s; release history: 24:superseded 25:failed 26:deployed
+  schema unchanged: drill_bad column exists = 0
+  pods still serving:  2 stable:localarena/api:v1 
+  requests during the failed upgrade: ok=836 

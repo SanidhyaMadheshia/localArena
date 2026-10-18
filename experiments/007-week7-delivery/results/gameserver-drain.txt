@@ -1,0 +1,4 @@
+old pod readiness after SIGTERM: false (false = out of the Service, still serving its players)
+old pod exited 22 s after SIGTERM (after its players left, < grace 45 s)
+bots: {"connects":20,"connect_failures":0,"server_drops":0}
+gameserver log: 

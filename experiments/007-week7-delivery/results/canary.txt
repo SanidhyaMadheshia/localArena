@@ -1,0 +1,6 @@
+canary:  1 canary:localarena/api:v2 2 stable:localarena/api:v1 
+requests during canary: ok=744 
+  api-86cd4bc5f9-5n7b9 246 (33%)
+  api-86cd4bc5f9-kb8h4 270 (36%)
+  api-canary-db6c4bdcd-5sk5k 228 (31%)
+promoted:  2 stable:localarena/api:v2 

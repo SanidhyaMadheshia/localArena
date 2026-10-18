@@ -51,6 +51,12 @@ func run(ctx context.Context, dsn string, args []string) error {
 	}
 	switch args[0] {
 	case "up":
+		// Failed-migration drill (Experiment 007): fail like a bad migration would,
+		// after connecting, so the release's pre-upgrade hook fails.
+		if os.Getenv("MIGRATE_FAIL_FOR_DRILL") == "1" {
+			_, err := db.ExecContext(ctx, `ALTER TABLE profiles ADD COLUMN drill_bad integer NOT NULL CHECK (drill_bad > 0)`)
+			return fmt.Errorf("drill migration failed (as intended): %w", err)
+		}
 		res, err := p.Up(ctx)
 		for _, r := range res {
 			fmt.Println(r)

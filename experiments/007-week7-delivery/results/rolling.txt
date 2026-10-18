@@ -1,0 +1,4 @@
+start:  2 stable:localarena/api:v1 
+rolled v1 -> v2 in 12 s (maxSurge 1, maxUnavailable 0, readiness gate + 5 s drain)
+after:  2 stable:localarena/api:v2 
+requests during rollout: ok=1672 

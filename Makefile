@@ -153,3 +153,17 @@ drill-failover:
 	experiments/006-week6-observability/failover-rpo.sh
 incident:
 	experiments/006-week6-observability/incident.sh start
+
+# ---- Week 7 Kubernetes delivery ----
+.PHONY: helm-lint k8s-platform k8s-app drills-007
+helm-lint:
+	helm lint infra/helm/localarena -f infra/helm/localarena/values-dev.yaml
+	helm template la infra/helm/localarena -f infra/helm/localarena/values-dev.yaml --set api.canary.enabled=true > /dev/null
+k8s-platform:
+	cd infra/opentofu && tofu init -input=false && tofu apply -input=false
+k8s-app:
+	kubectl apply -f infra/argocd/localarena-app.yaml
+drills-007:
+	kubectl -n argocd patch app localarena --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+	experiments/007-week7-delivery/drills.sh
+	kubectl -n argocd patch app localarena --type merge -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'

@@ -1,0 +1,2 @@
+helm rollback to revision 22 in 6 s:  2 stable:localarena/api:v1 
+requests during rollback: ok=1108 
