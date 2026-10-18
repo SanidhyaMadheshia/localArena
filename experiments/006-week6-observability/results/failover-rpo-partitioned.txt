@@ -1,0 +1,15 @@
+replica sync before fault: streaming replay_lag=00:00:00.000621
+replica partitioned for 5s while writes continue
+primary killed at +0 s
+acknowledged writes: 278 (last id 278); on promoted replica: 139 (last id 139)
+RPO: 139 acknowledged writes lost = 2.78 s of writes (async replication + 5s partition)
+RTO (DB only): promote .5534 s, first write accepted .6996 s after the kill
+ Container localarena-postgres-replica-1 Stopping 
+ Container localarena-postgres-replica-1 Stopped 
+ Container localarena-postgres-1 Starting 
+ Container localarena-postgres-1 Started 
+ Container localarena-postgres-replica-1 Stopping 
+ Container localarena-postgres-replica-1 Stopped 
+ Container localarena-postgres-replica-1 Removing 
+ Container localarena-postgres-replica-1 Removed 
+topology restored: old primary back as primary (its writes intact), replica re-cloned: streaming

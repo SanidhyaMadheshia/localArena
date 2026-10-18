@@ -1,0 +1,7 @@
+dump: 1.8M in .4865 s (taken while 300 writes ran)
+restore into a fresh instance: .6102 s
+restored : players=1020 purchases=1197 credits=999929690 inventory=1197 match_players=200000 outbox=1656 migrations=12
+live now : players=1039 purchases=1197 credits=999948690 inventory=1197 match_players=200000 outbox=1656 migrations=12  (newer: writes continued after the snapshot)
+constraints on restored copy: 0 not validated; negative credits: 0
+partitions restored: 5
+app smoke on restored DB: 12

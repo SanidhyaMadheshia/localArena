@@ -1,0 +1,3 @@
+apiVersion: 1
+providers:
+  - { name: localarena, folder: LocalArena, type: file, options: { path: /var/lib/grafana/dashboards } }

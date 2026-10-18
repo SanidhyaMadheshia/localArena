@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -77,14 +78,18 @@ func New(primary, replica *pgxpool.Pool) *Store {
 }
 
 // queryTracer counts statements; enough to make N+1 visible in metrics.
-type queryTracer struct{}
+// queryTracer counts statements (N+1 detector) and forwards to the
+// OpenTelemetry pgx tracer, which creates one span per query (adr/0016).
+type queryTracer struct{ otel *otelpgx.Tracer }
 
-func (queryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+func (t queryTracer) TraceQueryStart(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
 	queries.Inc()
 	QueryCount.Add(1)
-	return ctx
+	return t.otel.TraceQueryStart(ctx, c, d)
 }
-func (queryTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+func (t queryTracer) TraceQueryEnd(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryEndData) {
+	t.otel.TraceQueryEnd(ctx, c, d)
+}
 
 // NewPool opens a pool with explicit, small limits. Acquire waits are bounded
 // by the caller's context, so pool exhaustion surfaces as a timeout instead of
@@ -99,7 +104,7 @@ func NewPool(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, er
 	}
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	cfg.HealthCheckPeriod = 30 * time.Second
-	cfg.ConnConfig.Tracer = queryTracer{}
+	cfg.ConnConfig.Tracer = queryTracer{otel: otelpgx.NewTracer()}
 	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
 	return pgxpool.NewWithConfig(ctx, cfg)
 }

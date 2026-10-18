@@ -139,3 +139,17 @@ scan:
 	trivy image --severity HIGH,CRITICAL localarena/api:dev localarena/gameserver:dev localarena/streams:dev
 	trivy config --severity HIGH,CRITICAL --skip-dirs experiments .
 	cd $(BACKEND) && gosec -quiet -exclude-generated -exclude=G404 ./...
+
+# ---- Week 6 observability / SRE ----
+.PHONY: obs-up alert-test drill-backup drill-failover incident
+obs-up:
+	docker compose --profile observability up -d
+alert-test:
+	docker run --rm --entrypoint promtool -v $(CURDIR)/infra/observability:/o -w /o/rules-tests prom/prometheus:v3.13.4 test rules slo_test.yml
+	docker run --rm --entrypoint promtool -v $(CURDIR)/infra/observability:/o prom/prometheus:v3.13.4 check rules /o/rules/slo.yml
+drill-backup:
+	experiments/006-week6-observability/backup-restore.sh
+drill-failover:
+	experiments/006-week6-observability/failover-rpo.sh
+incident:
+	experiments/006-week6-observability/incident.sh start

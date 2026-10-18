@@ -1,0 +1,107 @@
+# SLIs, SLOs and burn-rate alerts (adr/0017). Targets from the README:
+#   availability : 99.5% of API requests are not 5xx            (30 d)
+#   latency      : 99% of API requests complete in < 300 ms     (30 d)
+#   ticks        : 99.9% of game ticks finish in < 50 ms        (30 d)
+#   events       : 99% of durable events are delivered (not dropped)
+# Burn-rate alerts use the multi-window pattern from the Google SRE workbook:
+# page when the 1 h AND 5 m burn rate exceed 14.4x (2% of the 30 d budget in
+# 1 h); ticket when the 6 h AND 30 m burn rate exceed 6x (5% in 6 h). The
+# short window makes the alert reset quickly once the problem is fixed.
+groups:
+  - name: slo-sli
+    rules:
+      # --- availability: error ratio = 5xx / all ---
+      - &avail
+        record: slo:api_errors:ratio_rate5m
+        expr: (sum(rate(localarena_http_requests_total{code="5xx"}[5m])) or vector(0)) / clamp_min(sum(rate(localarena_http_requests_total[5m])), 1e-9)
+      - { <<: *avail, record: slo:api_errors:ratio_rate30m, expr: '(sum(rate(localarena_http_requests_total{code="5xx"}[30m])) or vector(0)) / clamp_min(sum(rate(localarena_http_requests_total[30m])), 1e-9)' }
+      - { <<: *avail, record: slo:api_errors:ratio_rate1h, expr: '(sum(rate(localarena_http_requests_total{code="5xx"}[1h])) or vector(0)) / clamp_min(sum(rate(localarena_http_requests_total[1h])), 1e-9)' }
+      - { <<: *avail, record: slo:api_errors:ratio_rate6h, expr: '(sum(rate(localarena_http_requests_total{code="5xx"}[6h])) or vector(0)) / clamp_min(sum(rate(localarena_http_requests_total[6h])), 1e-9)' }
+      # --- latency: fraction of requests slower than 300 ms ---
+      - record: slo:api_slow:ratio_rate5m
+        expr: 1 - sum(rate(localarena_http_request_duration_seconds_bucket{le="0.3"}[5m])) / clamp_min(sum(rate(localarena_http_request_duration_seconds_count[5m])), 1e-9)
+      - record: slo:api_slow:ratio_rate1h
+        expr: 1 - sum(rate(localarena_http_request_duration_seconds_bucket{le="0.3"}[1h])) / clamp_min(sum(rate(localarena_http_request_duration_seconds_count[1h])), 1e-9)
+      # --- ticks: fraction of ticks over the 50 ms budget ---
+      - record: slo:ticks_slow:ratio_rate5m
+        expr: 1 - sum(rate(localarena_tick_duration_seconds_bucket{le="0.05"}[5m])) / clamp_min(sum(rate(localarena_tick_duration_seconds_count[5m])), 1e-9)
+      - record: slo:ticks_slow:ratio_rate1h
+        expr: 1 - sum(rate(localarena_tick_duration_seconds_bucket{le="0.05"}[1h])) / clamp_min(sum(rate(localarena_tick_duration_seconds_count[1h])), 1e-9)
+      # --- events: dropped durable events / queued ---
+      - record: slo:events_dropped:ratio_rate5m
+        expr: (sum(rate(localarena_events_total{class="durable",result=~"dropped.*|failed"}[5m])) or vector(0)) / clamp_min(sum(rate(localarena_events_total{class="durable",result="queued"}[5m])), 1e-9)
+      # --- latency percentiles for dashboards ---
+      - record: route:api_latency:p99_5m
+        expr: histogram_quantile(0.99, sum by (le, route) (rate(localarena_http_request_duration_seconds_bucket[5m])))
+      - record: slo:error_budget_remaining:avail_30d
+        expr: 1 - ((sum(increase(localarena_http_requests_total{code="5xx"}[30d])) or vector(0)) / clamp_min(sum(increase(localarena_http_requests_total[30d])), 1) ) / 0.005
+
+  - name: slo-alerts
+    rules:
+      - alert: LocalArenaAvailabilityBurnFast
+        expr: slo:api_errors:ratio_rate1h > (14.4 * 0.005) and slo:api_errors:ratio_rate5m > (14.4 * 0.005)
+        labels: { severity: page, slo: availability }
+        annotations:
+          summary: "API error budget burning fast ({{ $value | humanizePercentage }} 5xx over 1 h)"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/api-availability.md
+      - alert: LocalArenaAvailabilityBurnSlow
+        expr: slo:api_errors:ratio_rate6h > (6 * 0.005) and slo:api_errors:ratio_rate30m > (6 * 0.005)
+        labels: { severity: ticket, slo: availability }
+        annotations:
+          summary: "API error budget burning (6 h 5xx ratio {{ $value | humanizePercentage }})"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/api-availability.md
+      - alert: LocalArenaLatencyBurnFast
+        expr: slo:api_slow:ratio_rate1h > (14.4 * 0.01) and slo:api_slow:ratio_rate5m > (14.4 * 0.01)
+        labels: { severity: page, slo: latency }
+        annotations:
+          summary: "More than 14% of API requests slower than 300 ms"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/api-latency.md
+      - alert: LocalArenaTickBudgetBurn
+        # Guard (postmortem PM-001): with zero ticks the ratio is 1 - 0/epsilon = 100% and paged falsely.
+        expr: slo:ticks_slow:ratio_rate5m > (14.4 * 0.001) and slo:ticks_slow:ratio_rate1h > (14.4 * 0.001) and sum(rate(localarena_tick_duration_seconds_count[5m])) > 0
+        labels: { severity: page, slo: ticks }
+        annotations:
+          summary: "Game ticks exceeding the 50 ms budget"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/tick-budget.md
+      - alert: LocalArenaDurableEventsDropped
+        expr: slo:events_dropped:ratio_rate5m > 0.01
+        for: 2m
+        labels: { severity: page, slo: events }
+        annotations:
+          summary: "Durable gameplay events are being dropped (spool full or failing)"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/event-pipeline.md
+
+  - name: causes
+    rules:
+      - alert: LocalArenaTargetDown
+        expr: up == 0
+        for: 30s
+        labels: { severity: ticket }
+        annotations: { summary: "{{ $labels.job }} target {{ $labels.instance }} is down", runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/api-availability.md }
+      - alert: LocalArenaEventSpoolGrowing
+        expr: max(localarena_events_spool_bytes) > 1e6
+        for: 2m
+        labels: { severity: ticket }
+        annotations: { summary: "Gameserver spooling events to disk (Kafka unreachable?)", runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/event-pipeline.md }
+      - alert: LocalArenaPostgresReplicaLag
+        expr: max(pg_replication_lag_seconds) > 30
+        for: 1m
+        labels: { severity: ticket }
+        annotations: { summary: "Replica {{ $value }}s behind primary", runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/postgres.md }
+      - alert: LocalArenaReplicationSlotRetainingWAL
+        expr: max(pg_replication_slots_pg_wal_lsn_diff) > 1e9
+        for: 5m
+        labels: { severity: ticket }
+        annotations: { summary: "A replication slot retains > 1 GB WAL (Debezium down?)", runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/postgres.md }
+      - alert: LocalArenaPgBouncerClientsWaiting # PM-001: the cause signal that was missing
+        expr: max(pgbouncer_pools_client_waiting_connections) > 5 and max(pgbouncer_pools_server_active_connections) == 0
+        for: 30s
+        labels: { severity: page }
+        annotations:
+          summary: "PgBouncer has {{ $value }} clients waiting and no active server connections (paused or DB unreachable)"
+          runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/postgres.md
+      - alert: LocalArenaDBPoolSaturated
+        expr: max(localarena_db_pool_acquired_conns / localarena_db_pool_max_conns) > 0.9
+        for: 1m
+        labels: { severity: ticket }
+        annotations: { summary: "API DB pool > 90% busy", runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/api-latency.md }

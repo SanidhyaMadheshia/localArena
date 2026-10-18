@@ -180,7 +180,7 @@ func (s *Server) banPlayer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.log.Info("player banned", "player", req.PlayerID, "by", p.Subject, "hours", req.Hours) // audit trail
+	s.log.InfoContext(r.Context(), "player banned", "player", req.PlayerID, "by", p.Subject, "hours", req.Hours) // audit trail
 	w.WriteHeader(http.StatusNoContent)
 }
 

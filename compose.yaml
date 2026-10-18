@@ -53,6 +53,8 @@ services:
       EVENT_SPOOL_DIR: /var/lib/gameserver/spool
       ALLOW_GUESTS: ${ALLOW_GUESTS:-1} # bots play as guests; set 0 to require game tickets
       FLAGD_URL: http://flagd:8016
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
     env_file: [{ path: .secrets.env, required: false }]
     command: ["-tick-hz", "20", "-capacity", "20", "-round-seconds", "${ROUND_SECONDS:-120}"]
     volumes: ["gameserver-spool:/var/lib/gameserver"]
@@ -139,6 +141,8 @@ services:
       OIDC_ISSUER: http://localhost:8180/realms/localarena
       OIDC_JWKS_URL: http://keycloak:8180/realms/localarena/protocol/openid-connect/certs
       OPA_URL: http://opa:8181
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
       LEGACY_V1: ${LEGACY_V1:-1} # unauthenticated /v1 kept for bots/k6 experiments; set 0 for a secure stack
     env_file: [{ path: .secrets.env, required: false }] # GAME_TICKET_SECRET etc. (scripts/secrets-env.sh)
     depends_on:
@@ -399,11 +403,82 @@ services:
     ports: ["127.0.0.1:5441:5432"]
     tmpfs: ["/var/lib/postgresql"]
 
+  # ---- Week 6 "observability" profile (adr/0016): docker compose --profile observability up -d ----
   prometheus:
     profiles: ["observability"]
     image: prom/prometheus:v3.13.4
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=3d", "--web.enable-lifecycle"]
     ports: ["127.0.0.1:9090:9090"]
-    volumes: ["./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/observability/rules:/etc/prometheus/rules:ro
+    deploy: { resources: { limits: { memory: 512M } } }
+  alertmanager:
+    profiles: ["observability"]
+    image: prom/alertmanager:v0.34.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes: ["./infra/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]
+    ports: ["127.0.0.1:9093:9093"]
+    deploy: { resources: { limits: { memory: 64M } } }
+  alert-sink: # lab pager: receives Alertmanager webhooks (GET :9095/alerts)
+    profiles: ["observability"]
+    image: localarena/api:dev
+    pull_policy: build
+    build: { context: ., target: api }
+    entrypoint: ["/alertsink"]
+    ports: ["127.0.0.1:9095:9095"]
+    deploy: { resources: { limits: { memory: 32M } } }
+  otel-collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector-contrib:0.163.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: ["./infra/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro"]
+    deploy: { resources: { limits: { memory: 256M } } }
+  tempo:
+    profiles: ["observability"]
+    image: grafana/tempo:3.0.4
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: "0"
+    volumes: ["./infra/observability/tempo.yaml:/etc/tempo.yaml:ro", "tempo-data:/var/tempo"]
+    deploy: { resources: { limits: { memory: 512M } } }
+  loki:
+    profiles: ["observability"]
+    image: grafana/loki:3.6.18
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes: ["./infra/observability/loki.yaml:/etc/loki/config.yaml:ro", "loki-data:/loki"]
+    deploy: { resources: { limits: { memory: 384M } } }
+  alloy: # ships container logs to Loki; reads the Docker socket (read-only mount)
+    profiles: ["observability"]
+    image: grafana/alloy:v1.20.1
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy"]
+    volumes:
+      - ./infra/observability/alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy: { resources: { limits: { memory: 256M } } }
+  postgres-exporter:
+    profiles: ["observability"]
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://localarena:${POSTGRES_PASSWORD:-localarena-dev}@postgres:5432/localarena?sslmode=disable
+    command: ["--collector.replication", "--collector.replication_slots", "--collector.stat_replication"]
+    deploy: { resources: { limits: { memory: 64M } } }
+  pgbouncer-exporter: # PM-001: PgBouncer pool state (clients waiting, paused)
+    profiles: ["observability"]
+    image: prometheuscommunity/pgbouncer-exporter:v0.12.1
+    command: ["--pgBouncer.connectionString=postgres://localarena:${POSTGRES_PASSWORD:-localarena-dev}@pgbouncer:5432/pgbouncer?sslmode=disable"]
+    deploy: { resources: { limits: { memory: 32M } } }
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:13.2.4
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true" # lab only: loopback-bound, read-only viewer
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana-dev}
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
+    deploy: { resources: { limits: { memory: 384M } } }
 
   bots:
     profiles: ["load"]
@@ -414,6 +489,8 @@ services:
     depends_on: [gameserver]
 
 volumes:
+  tempo-data:
+  loki-data:
   gameserver-spool:
   streams-1:
   streams-2:

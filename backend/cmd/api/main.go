@@ -28,16 +28,18 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/api"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/authz"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/cache"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/obs"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := obs.NewLogger("api", slog.LevelInfo)
 	if err := run(log); err != nil {
 		log.Error("api exited", "err", err)
 		os.Exit(1)
@@ -47,6 +49,11 @@ func main() {
 func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	shutdownTracing, err := obs.Setup(ctx, "api")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
 
 	maxConns := int32(10)
 	if v, err := strconv.ParseInt(os.Getenv("DB_MAX_CONNS"), 10, 32); err == nil && v > 0 {
@@ -114,8 +121,9 @@ func run(log *slog.Logger) error {
 		addr = ":8081"
 	}
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           apiSrv.Handler(),
+		Addr: addr,
+		// otelhttp: server span per request, continues W3C traceparent from Envoy/clients.
+		Handler:           otelhttp.NewHandler(apiSrv.Handler(), "api"), // span renamed to the route in api.red
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      5 * time.Second, // > 3 s request budget, so handlers finish their own error replies

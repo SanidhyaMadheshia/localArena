@@ -1,0 +1,507 @@
+{
+ "uid": "localarena-overview",
+ "title": "LocalArena overview",
+ "schemaVersion": 39,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "refresh": "10s",
+ "tags": [
+  "localarena"
+ ],
+ "panels": [
+  {
+   "type": "row",
+   "title": "SLOs",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "collapsed": false
+  },
+  {
+   "type": "timeseries",
+   "title": "Availability error ratio (5m) vs 0.5% SLO",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "slo:api_errors:ratio_rate5m",
+     "legendFormat": "5m",
+     "refId": "A"
+    },
+    {
+     "expr": "slo:api_errors:ratio_rate1h",
+     "legendFormat": "1h",
+     "refId": "B"
+    },
+    {
+     "expr": "vector(0.005)",
+     "legendFormat": "SLO",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Requests slower than 300 ms vs 1% SLO",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "slo:api_slow:ratio_rate5m",
+     "legendFormat": "5m",
+     "refId": "A"
+    },
+    {
+     "expr": "vector(0.01)",
+     "legendFormat": "SLO",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ticks over 50 ms vs 0.1% SLO",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "slo:ticks_slow:ratio_rate5m",
+     "legendFormat": "5m",
+     "refId": "A"
+    },
+    {
+     "expr": "vector(0.001)",
+     "legendFormat": "SLO",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "API (RED)",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 9
+   },
+   "collapsed": false
+  },
+  {
+   "type": "timeseries",
+   "title": "Rate by route",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 10
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (route) (rate(localarena_http_requests_total[1m]))",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Errors (5xx) by route",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 10
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (route) (rate(localarena_http_requests_total{code=\"5xx\"}[1m]))",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "p99 latency by route",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 10
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "route:api_latency:p99_5m",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Game",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 18
+   },
+   "collapsed": false
+  },
+  {
+   "type": "timeseries",
+   "title": "Players / matches",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 19
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "localarena_players",
+     "legendFormat": "players",
+     "refId": "A"
+    },
+    {
+     "expr": "localarena_matches",
+     "legendFormat": "matches",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Tick duration p50/p99",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 19
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(localarena_tick_duration_seconds_bucket[1m])))",
+     "legendFormat": "p50",
+     "refId": "A"
+    },
+    {
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(localarena_tick_duration_seconds_bucket[1m])))",
+     "legendFormat": "p99",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Snapshots replaced / skipped (slow clients)",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 19
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (result) (rate(localarena_snapshots_total{result!=\"queued\"}[1m]))",
+     "legendFormat": "{{result}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Events & dependencies",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 27
+   },
+   "collapsed": false
+  },
+  {
+   "type": "timeseries",
+   "title": "Durable events by result",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 28
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (result) (rate(localarena_events_total{class=\"durable\"}[1m]))",
+     "legendFormat": "{{result}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Event spool bytes",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 28
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "localarena_events_spool_bytes",
+     "legendFormat": "spool",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Cache ops / breaker",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 28
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (result) (rate(localarena_cache_ops_total[1m]))",
+     "legendFormat": "{{result}}",
+     "refId": "A"
+    },
+    {
+     "expr": "max(localarena_cache_breaker_state)",
+     "legendFormat": "breaker (2=open)",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Database",
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 36
+   },
+   "collapsed": false
+  },
+  {
+   "type": "timeseries",
+   "title": "DB pool in use",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 37
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (pool) (localarena_db_pool_acquired_conns)",
+     "legendFormat": "{{pool}} acquired",
+     "refId": "A"
+    },
+    {
+     "expr": "max by (pool) (localarena_db_pool_max_conns)",
+     "legendFormat": "{{pool}} max",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Replica lag",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 37
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "max(pg_replication_lag_seconds)",
+     "legendFormat": "lag",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Tx retries (deadlock/serialization/optimistic)",
+   "datasource": {
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 37
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (reason) (rate(localarena_db_tx_retries_total[1m]))",
+     "legendFormat": "{{reason}}",
+     "refId": "A"
+    }
+   ]
+  }
+ ],
+ "links": [
+  {
+   "title": "Runbooks",
+   "url": "https://github.com/SanidhyaMadheshia/localArena/tree/main/runbooks",
+   "type": "link"
+  }
+ ]
+}

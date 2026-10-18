@@ -274,3 +274,22 @@ func TestMatchResultWebhook(t *testing.T) {
 		t.Fatalf("match recorded %d times, want exactly 1", n)
 	}
 }
+
+func TestREDRouteLabels(t *testing.T) {
+	srv := api.New(store.New(nil, nil), slog.New(slog.DiscardHandler))
+	h := srv.Handler()
+	for _, p := range []string{"/v1/players/abc", "/nope"} {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", p, nil))
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+	for _, want := range []string{`route="GET /v1/players/{id}"`, `route="unmatched"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %s", want)
+		}
+	}
+	if strings.Contains(body, "/v1/players/abc") {
+		t.Error("raw path leaked into a metric label")
+	}
+}

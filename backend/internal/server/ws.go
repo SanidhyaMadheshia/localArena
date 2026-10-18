@@ -10,6 +10,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/engine"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
@@ -46,7 +51,12 @@ const (
 	laggingInterval = time.Second
 )
 
+var tracer = otel.Tracer("localarena/gameserver")
+
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
+	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	ctx, span := tracer.Start(ctx, "ws.join", trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
 	// Authenticate before upgrading, so a refused client gets a plain HTTP 401.
 	var account engine.PlayerID
 	switch q := r.URL.Query(); {
@@ -71,6 +81,11 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		return // Upgrade already replied with an HTTP error
 	}
 	m, c, err := s.mgr.Join(account) // one live session per account
+	if err == nil {
+		span.SetAttributes(attribute.String("match.id", m.ID), attribute.Int64("player.id", int64(c.ID)))
+	} else {
+		span.SetStatus(codes.Error, err.Error())
+	}
 	if errors.Is(err, match.ErrAlreadyPlaying) {
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "already connected"), time.Now().Add(writeWait))
@@ -86,7 +101,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	telemetry.Connections.Inc()
 	ss := &session{conn: conn, mgr: s.mgr, m: m, c: c,
 		log: s.log.With("player", c.ID, "match", m.ID, "remote", r.RemoteAddr)}
-	ss.log.Debug("session open")
+	ss.log.InfoContext(ctx, "session open")
 	go ss.writePump()
 	go ss.readPump()
 }

@@ -17,7 +17,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/auth"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/authz"
@@ -109,7 +112,63 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.Handle("GET /metrics", promhttp.Handler())
-	return securityHeaders(withTimeout(mux))
+	return red(securityHeaders(withTimeout(patternRecorder(mux))), mux)
+}
+
+var (
+	httpRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "localarena", Subsystem: "http", Name: "requests_total",
+		Help: "API requests by route pattern, method and status class (RED: rate, errors).",
+	}, []string{"route", "method", "code"})
+	httpDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "localarena", Subsystem: "http", Name: "request_duration_seconds",
+		Help:    "API request latency by route pattern (RED: duration).",
+		Buckets: []float64{.001, .0025, .005, .01, .025, .05, .1, .2, .3, .5, 1, 2.5, 5},
+	}, []string{"route", "method"})
+)
+
+type statusRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (r *statusRecorder) WriteHeader(c int)           { r.code = c; r.ResponseWriter.WriteHeader(c) }
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// red records request rate, errors and duration labelled by the matched route
+// pattern (bounded cardinality: never the raw path). The pattern is read from
+// the request after routing: ServeMux sets r.Pattern on the request it passes
+// down, so handlers record it into routeHolder (nested muxes overwrite with
+// the more specific pattern).
+func red(next http.Handler, _ *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rh := &routeHolder{}
+		r = r.WithContext(context.WithValue(r.Context(), routeKey{}, rh))
+		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rec, r)
+		route := rh.route
+		if route == "" {
+			route = "unmatched"
+		}
+		trace.SpanFromContext(r.Context()).SetName(route) // otelhttp server span
+		httpDuration.WithLabelValues(route, r.Method).Observe(time.Since(start).Seconds())
+		httpRequests.WithLabelValues(route, r.Method, strconv.Itoa(rec.code/100)+"xx").Inc()
+	})
+}
+
+type routeKey struct{}
+type routeHolder struct{ route string }
+
+// patternRecorder wraps a mux so the matched pattern reaches red().
+func patternRecorder(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pat := mux.Handler(r)
+		if rh, ok := r.Context().Value(routeKey{}).(*routeHolder); ok && pat != "" {
+			rh.route = pat
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // registerV1 serves the original API. With auth enabled it is deprecated:
@@ -128,13 +187,13 @@ func (s *Server) registerV1(outer *http.ServeMux) {
 	mux.HandleFunc("GET /v1/lobbies/{id}", s.getLobby)
 	mux.HandleFunc("PUT /v1/players/{id}/presence", s.heartbeat)
 	mux.HandleFunc("GET /v1/presence", s.presence)
-	var h http.Handler = mux
+	var h = patternRecorder(mux) // records the specific v1 route, not "/v1/"
 	if s.opts.Auth != nil {
 		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Deprecation", "@1792281600") // 2026-10-18
 			w.Header().Set("Sunset", "Sun, 31 Jan 2027 00:00:00 GMT")
 			w.Header().Set("Link", `</v2/>; rel="successor-version"`)
-			mux.ServeHTTP(w, r)
+			patternRecorder(mux).ServeHTTP(w, r)
 		})
 	}
 	outer.Handle("/v1/", h)
@@ -204,7 +263,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		msg = "temporarily unavailable"
 	}
 	if status == http.StatusInternalServerError {
-		s.log.Error("request failed", "path", r.URL.Path, "err", err)
+		s.log.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "err", err)
 		msg = "internal error"
 	}
 	writeJSON(w, status, map[string]string{"error": msg})
@@ -274,7 +333,7 @@ func lobbyKey(id int64) string   { return "lobby:v1:" + strconv.FormatInt(id, 10
 func (s *Server) invalidate(r *http.Request, keys ...string) {
 	for _, k := range keys {
 		if err := s.opts.Cache.Invalidate(r.Context(), k); err != nil && s.opts.Cache.Enabled() {
-			s.log.Warn("cache invalidation failed; stale until TTL", "key", k, "err", err)
+			s.log.WarnContext(r.Context(), "cache invalidation failed; stale until TTL", "key", k, "err", err)
 		}
 	}
 }

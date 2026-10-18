@@ -1,0 +1,23 @@
+# Alertmanager: group by alert, page on critical, ticket on warning. The lab
+# "pager" is a webhook into the Go alert-sink (logs + /alerts), standing in for
+# PagerDuty/Slack; swap the receiver URL for a real integration.
+route:
+  receiver: ticket
+  group_by: [alertname, slo]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="page"]
+      receiver: page
+      group_wait: 5s
+receivers:
+  - name: page
+    webhook_configs: [{ url: http://alert-sink:9095/page, send_resolved: true }]
+  - name: ticket
+    webhook_configs: [{ url: http://alert-sink:9095/ticket, send_resolved: true }]
+inhibit_rules:
+  # A dead API replica explains SLO burn; do not page twice for one cause.
+  - source_matchers: [alertname="LocalArenaTargetDown"]
+    target_matchers: [severity="page"]
+    equal: [job]

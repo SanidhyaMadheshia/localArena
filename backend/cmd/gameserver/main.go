@@ -22,6 +22,7 @@ import (
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/events"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/flags"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/match"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/obs"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/server"
 )
 
@@ -44,7 +45,7 @@ func main() {
 
 	var lvl slog.Level
 	_ = lvl.UnmarshalText([]byte(*logLevel))
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
+	log := obs.NewLogger("gameserver", lvl)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -75,6 +76,12 @@ func main() {
 		defer cancel()
 		return fl.String(ctx, "game-mode", round, "classic")
 	}
+	shutdownTracing, err := obs.Setup(ctx, "gameserver")
+	if err != nil {
+		log.Error("tracing", "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
 	mgr := match.NewManager(match.Options{ModeFor: modeFor, TickHz: *tickHz, Capacity: *capacity, Seed: *seed,
 		Events: pub, RoundTicks: uint64(max(*roundSecs, 0) * *tickHz)}) // #nosec G115 -- clamped non-negative
 	srv := &http.Server{

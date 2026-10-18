@@ -1,0 +1,71 @@
+# docker run --rm --entrypoint promtool -v $PWD/infra/observability:/o -w /o/rules-tests prom/prometheus:v3.13.4 test rules slo_test.yml
+rule_files: [../rules/slo.yml]
+evaluation_interval: 1m
+tests:
+  - name: 10% errors for an hour pages; 0.1% does not
+    interval: 1m
+    input_series:
+      - series: 'localarena_http_requests_total{code="2xx",route="GET /x",method="GET"}'
+        values: '0+900x70'
+      - series: 'localarena_http_requests_total{code="5xx",route="GET /x",method="GET"}'
+        values: '0+100x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: LocalArenaAvailabilityBurnFast
+        exp_alerts:
+          - exp_labels: { severity: page, slo: availability }
+            exp_annotations:
+              summary: "API error budget burning fast (10% 5xx over 1 h)"
+              runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/api-availability.md
+  - name: healthy traffic does not page
+    interval: 1m
+    input_series:
+      - series: 'localarena_http_requests_total{code="2xx",route="GET /x",method="GET"}'
+        values: '0+999x70'
+      - series: 'localarena_http_requests_total{code="5xx",route="GET /x",method="GET"}'
+        values: '0+1x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: LocalArenaAvailabilityBurnFast
+        exp_alerts: []
+  - name: slow ticks page
+    interval: 1m
+    input_series:
+      - series: 'localarena_tick_duration_seconds_bucket{le="0.05"}'
+        values: '0+1100x70'
+      - series: 'localarena_tick_duration_seconds_count'
+        values: '0+1200x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: LocalArenaTickBudgetBurn
+        exp_alerts:
+          - exp_labels: { severity: page, slo: ticks }
+            exp_annotations:
+              summary: "Game ticks exceeding the 50 ms budget"
+              runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/tick-budget.md
+  - name: no ticks (no matches running) must not page  # PM-001 regression
+    interval: 1m
+    input_series:
+      - series: 'localarena_tick_duration_seconds_bucket{le="0.05"}'
+        values: '0x70'
+      - series: 'localarena_tick_duration_seconds_count'
+        values: '0x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: LocalArenaTickBudgetBurn
+        exp_alerts: []
+  - name: paused pgbouncer pages on the cause
+    interval: 15s
+    input_series:
+      - series: 'pgbouncer_pools_client_waiting_connections{database="localarena"}'
+        values: '30x10'
+      - series: 'pgbouncer_pools_server_active_connections{database="localarena"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: LocalArenaPgBouncerClientsWaiting
+        exp_alerts:
+          - exp_labels: { severity: page }
+            exp_annotations:
+              summary: "PgBouncer has 30 clients waiting and no active server connections (paused or DB unreachable)"
+              runbook_url: https://github.com/SanidhyaMadheshia/localArena/blob/main/runbooks/postgres.md

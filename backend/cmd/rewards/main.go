@@ -18,12 +18,13 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/obs"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/rewards"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := obs.NewLogger("rewards", slog.LevelInfo)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	brokers, dsn := os.Getenv("KAFKA_BROKERS"), os.Getenv("DATABASE_URL")

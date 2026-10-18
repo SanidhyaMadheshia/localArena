@@ -1,0 +1,38 @@
+// Grafana Alloy: tail LocalArena container logs from the Docker socket, parse
+// the JSON (slog) lines, and ship to Loki with low-cardinality labels only
+// (service, level). trace_id stays in the line for Grafana's trace links.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=localarena"]
+  }
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.json.receiver]
+}
+
+loki.process "json" {
+  stage.json {
+    expressions = { level = "level", service = "service" }
+  }
+  stage.labels {
+    values = { level = "", service = "" }
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint { url = "http://loki:3100/loki/api/v1/push" }
+}
