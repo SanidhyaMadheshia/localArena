@@ -1,0 +1,3 @@
+go_goroutines 11
+localarena_matches 0
+localarena_players 0

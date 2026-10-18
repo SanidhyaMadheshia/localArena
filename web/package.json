@@ -1,0 +1,12 @@
+{
+  "name": "localarena-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . --watch"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

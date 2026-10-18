@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LocalArena</title>
+  <style>
+    body { margin: 0; font: 14px system-ui, sans-serif; background: #111; color: #eee; display: flex; gap: 16px; padding: 16px; }
+    canvas { background: #1d2330; border: 1px solid #333; width: min(80vh, 70vw); aspect-ratio: 1; }
+    aside { min-width: 220px; }
+    ol { padding-left: 20px; }
+    .me { color: #4fc3f7; font-weight: 600; }
+    #status[data-state="closed"] { color: #ef5350; }
+  </style>
+</head>
+<body>
+  <canvas id="arena" width="1000" height="1000" aria-label="Arena: players are circles, items are yellow squares. Move with arrow keys or WASD."></canvas>
+  <aside>
+    <h1>LocalArena</h1>
+    <p id="status" role="status" aria-live="polite">connecting…</p>
+    <p>Move: WASD / arrow keys</p>
+    <dl>
+      <dt>Tick</dt><dd id="tick">-</dd>
+      <dt>Input RTT</dt><dd id="rtt">-</dd>
+    </dl>
+    <h2>Scores</h2>
+    <ol id="scores"></ol>
+  </aside>
+  <script type="module" src="dist/main.js"></script>
+</body>
+</html>

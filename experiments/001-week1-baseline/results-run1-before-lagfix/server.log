@@ -1,0 +1,4 @@
+{"time":"2026-10-18T12:20:09.486224128+05:30","level":"INFO","msg":"gameserver listening","addr":":18080","tick_hz":20,"capacity":20}
+{"time":"2026-10-18T12:20:09.486253797+05:30","level":"INFO","msg":"debug listening","addr":"127.0.0.1:16060"}
+{"time":"2026-10-18T12:25:27.571291672+05:30","level":"INFO","msg":"shutting down"}
+{"time":"2026-10-18T12:25:27.5714089+05:30","level":"INFO","msg":"stopped"}

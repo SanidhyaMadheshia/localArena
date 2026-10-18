@@ -1,0 +1,32 @@
+# LocalArena Week 1 stack. Start: docker compose up -d --build
+# Optional profiles: "observability" (Prometheus), "load" (bot swarm).
+name: localarena
+
+services:
+  gameserver:
+    build: { context: ., target: gameserver }
+    image: localarena/gameserver:dev
+    pull_policy: build
+    # pprof listens on all container interfaces but is published on host loopback only.
+    ports: ["8080:8080", "127.0.0.1:6060:6060"]
+    environment: { DEBUG_ADDR: ":6060", LOG_LEVEL: info }
+    command: ["-tick-hz", "20", "-capacity", "20"]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 512M }
+    restart: unless-stopped
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.13.4
+    ports: ["127.0.0.1:9090:9090"]
+    volumes: ["./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    depends_on: [gameserver]
+
+  bots:
+    profiles: ["load"]
+    build: { context: ., target: bots }
+    image: localarena/bots:dev
+    pull_policy: build
+    command: ["-server", "http://gameserver:8080", "-bots", "100", "-duration", "60s"]
+    depends_on: [gameserver]

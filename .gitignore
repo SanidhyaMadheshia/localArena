@@ -1,0 +1,22 @@
+# Go
+/bin/
+*.test
+*.out
+*.prof
+coverage.*
+backend/internal/protocol/testdata/fuzz/
+
+# Web
+web/node_modules/
+web/dist/
+
+# Secrets and local env
+.env
+*.env
+*.key
+config/*.dec.*
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
