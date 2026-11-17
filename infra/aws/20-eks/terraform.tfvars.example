@@ -1,0 +1,9 @@
+# scripts/aws-up.sh passes admin_cidrs and admin_principal_arn itself; set them here for manual runs.
+admin_cidrs         = ["203.0.113.7/32"] # your public IP: curl -s https://ifconfig.me
+admin_principal_arn = "arn:aws:iam::123456789012:user/you"
+
+kubernetes_version   = "1.36"      # newest EKS is 1.37; one behind so drill 014 can upgrade
+instance_type        = "m7i.large" # fallback: m6i.large, m5.large
+capacity_type        = "ON_DEMAND"
+general_nodes_per_az = 1 # 0 = scale to zero
+kafka_nodes_per_az   = 1

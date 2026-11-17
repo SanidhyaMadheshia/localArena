@@ -25,3 +25,12 @@ web/assets/replay-sample.bin
 config/*.dec.yaml
 infra/compose/tls/*.key
 .tmp-save/
+
+# AWS stacks (infra/aws): state and caches stay local, lock files are committed
+infra/aws/**/.terraform/
+infra/aws/**/*.tfstate
+infra/aws/**/*.tfstate.*
+infra/aws/**/*.tfplan
+infra/aws/**/tfplan
+infra/aws/**/terraform.tfvars
+infra/aws/**/*.auto.tfvars

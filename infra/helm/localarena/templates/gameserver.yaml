@@ -15,9 +15,13 @@ spec:
     spec:
       {{- include "la.podSecurity" . | nindent 6 }}
       terminationGracePeriodSeconds: {{ .Values.gameserver.terminationGracePeriodSeconds }}
+      {{- if .Values.spread.zone }}
+      topologySpreadConstraints:
+        {{- include "la.zoneSpread" (dict "app" "gameserver") | nindent 8 }}
+      {{- end }}
       containers:
         - name: gameserver
-          image: {{ .Values.image.gameserver.repository }}:{{ .Values.image.gameserver.tag }}
+          image: {{ include "la.image" (dict "root" . "img" .Values.image.gameserver "tag" .Values.image.gameserver.tag) }}
           imagePullPolicy: {{ .Values.image.gameserver.pullPolicy }}
           args: ["-tick-hz", "20", "-capacity", "20", "-round-seconds", {{ .Values.gameserver.roundSeconds | quote }},
                  "-drain-timeout", "{{ sub .Values.gameserver.terminationGracePeriodSeconds 5 }}s"]
@@ -28,6 +32,12 @@ spec:
             {{- if .Values.flagd.enabled }}
             - { name: FLAGD_URL, value: "http://flagd:8016" }
             {{- end }}
+            {{- if .Values.kafka.bootstrap }}
+            {{- include "la.kafkaEnv" (dict "root" . "user" .Values.kafka.users.gameserver) | nindent 12 }}
+            {{- if .Values.gameserver.spool.enabled }}
+            - { name: EVENT_SPOOL_DIR, value: /var/lib/gameserver/spool }
+            {{- end }}
+            {{- end }}
           {{- with .Values.secrets.existing }}
           envFrom: [{ secretRef: { name: {{ . }} } }]
           {{- end }}
@@ -35,6 +45,25 @@ spec:
           livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
           {{- include "la.containerSecurity" . | nindent 10 }}
           resources: {{- toYaml .Values.gameserver.resources | nindent 12 }}
+          {{- if .Values.kafka.bootstrap }}
+          volumeMounts:
+            {{- include "la.kafkaCAMount" . | nindent 12 }}
+            {{- if .Values.gameserver.spool.enabled }}
+            - { name: spool, mountPath: /var/lib/gameserver/spool }
+            {{- end }}
+          {{- end }}
+      {{- if .Values.kafka.bootstrap }}
+      volumes:
+        {{- include "la.kafkaCAVolume" . | nindent 8 }}
+        {{- if .Values.gameserver.spool.enabled }}
+        - name: spool
+          {{- if .Values.gameserver.spool.pvc.enabled }}
+          persistentVolumeClaim: { claimName: gameserver-spool }
+          {{- else }}
+          emptyDir: { sizeLimit: {{ .Values.gameserver.spool.sizeLimit }} }
+          {{- end }}
+        {{- end }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

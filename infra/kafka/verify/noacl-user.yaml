@@ -1,0 +1,8 @@
+# Used only by scripts/k8s-kafka-verify.sh: authenticates fine, has no ACLs, so every data operation must be denied.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-noacl
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }

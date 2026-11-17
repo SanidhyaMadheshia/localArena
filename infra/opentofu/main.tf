@@ -24,7 +24,8 @@ resource "helm_release" "metrics_server" {
   repository = "https://kubernetes-sigs.github.io/metrics-server/"
   chart      = "metrics-server"
   version    = "3.14.0"
-  set        = [{ name = "args[0]", value = "--kubelet-insecure-tls" }] # kind kubelets use self-signed certs
+  # kind kubelets use self-signed certs; on EKS set insecure_kubelet_tls = false.
+  set = var.insecure_kubelet_tls ? [{ name = "args[0]", value = "--kubelet-insecure-tls" }] : []
 }
 
 resource "helm_release" "argocd" {

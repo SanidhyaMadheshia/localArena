@@ -1,0 +1,11 @@
+output "region" { value = var.region }
+output "name" { value = var.name }
+output "vpc_id" { value = aws_vpc.this.id }
+output "vpc_cidr" { value = aws_vpc.this.cidr_block }
+output "azs" { value = local.azs }
+output "public_subnet_ids" { value = aws_subnet.public[*].id }
+output "private_subnet_ids" { value = aws_subnet.private[*].id }
+output "private_route_table_ids" { value = aws_route_table.private[*].id }
+output "pg_backup_bucket" { value = aws_s3_bucket.pg_backups.bucket }
+output "pg_backup_bucket_arn" { value = aws_s3_bucket.pg_backups.arn }
+output "flow_logs_bucket" { value = try(aws_s3_bucket.flow_logs[0].bucket, null) }

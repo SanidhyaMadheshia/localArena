@@ -1,0 +1,5 @@
+region            = "us-east-1"
+name              = "localarena" # must equal cluster_name in 20-eks
+nat_gateway_count = 1            # 0, 1 or 3
+enable_flow_logs  = false        # true for the kafka-crossaz-flowlogs drill
+# azs = ["us-east-1a", "us-east-1b", "us-east-1c"]

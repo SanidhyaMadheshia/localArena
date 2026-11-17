@@ -20,3 +20,8 @@ variable "manage_app" {
   type        = bool
   default     = false
 }
+variable "insecure_kubelet_tls" {
+  description = "Pass --kubelet-insecure-tls to metrics-server. Needed on kind (self-signed kubelet certs); set false on EKS."
+  type        = bool
+  default     = true
+}

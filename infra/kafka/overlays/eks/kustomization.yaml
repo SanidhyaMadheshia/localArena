@@ -1,0 +1,43 @@
+# EKS: gp3 20Gi, dedicated node group (label workload=kafka, taint dedicated=kafka:NoSchedule),
+# brokers spread one per AZ. Requires a gp3 StorageClass named `gp3`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target: { kind: KafkaNodePool, name: dual-role }
+    patch: |-
+      - op: replace
+        path: /spec/storage/volumes/0/size
+        value: 20Gi
+      - op: add
+        path: /spec/storage/volumes/0/class
+        value: gp3
+      - op: replace
+        path: /spec/storage/volumes/0/deleteClaim
+        value: false
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: { memory: 3Gi, cpu: "1" }
+          limits: { memory: 4Gi }
+      - op: replace
+        path: /spec/jvmOptions
+        value: { "-Xms": 2g, "-Xmx": 2g }
+      - op: add
+        path: /spec/template/pod/tolerations
+        value:
+          - { key: dedicated, operator: Equal, value: kafka, effect: NoSchedule }
+      - op: add
+        path: /spec/template/pod/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - { key: workload, operator: In, values: [kafka] }
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: { strimzi.io/cluster: localarena, strimzi.io/name: localarena-kafka }

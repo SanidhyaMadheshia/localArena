@@ -1,0 +1,40 @@
+# JMX Prometheus exporter rules for brokers (kept to the metrics the SLO/alert rules need).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels: { clientId: "$3", topic: "$4", partition: "$5" }
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels: { clientId: "$3", broker: "$4:$5" }
+      - pattern: kafka.server<type=(.+), name=(.+)><>(Count|Value)
+        name: kafka_server_$1_$2
+        type: GAUGE
+      - pattern: kafka.server<type=(.+), name=(.+), topic=(.+)><>Count
+        name: kafka_server_$1_$2_total
+        type: COUNTER
+        labels: { topic: "$3" }
+      - pattern: kafka.server<type=(.+), name=(.+)><>Count
+        name: kafka_server_$1_$2_total
+        type: COUNTER
+      - pattern: kafka.controller<type=(.+), name=(.+)><>(Count|Value)
+        name: kafka_controller_$1_$2
+        type: GAUGE
+      - pattern: kafka.network<type=(.+), name=(.+)><>(Count|Value)
+        name: kafka_network_$1_$2
+        type: GAUGE
+      - pattern: kafka.log<type=Log, name=(.+), topic=(.+), partition=(.+)><>Value
+        name: kafka_log_log_$1
+        type: GAUGE
+        labels: { topic: "$2", partition: "$3" }
+      - pattern: java.lang<type=(.+), name=(.+)><(.+)>(\w+)
+        name: java_lang_$1_$4_$3_$2
+        type: GAUGE

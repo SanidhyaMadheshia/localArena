@@ -1,0 +1,17 @@
+# 3-zone kind cluster that mirrors the EKS layout (one worker per AZ). Strimzi's
+# rack.topologyKey = topology.kubernetes.io/zone resolves against these labels.
+# Create: make k8s3z-cluster   (DOCKER_CONTEXT=default is set by the target)
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: localarena-3z
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: a
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: b
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: c

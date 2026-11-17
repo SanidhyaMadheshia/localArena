@@ -1,0 +1,21 @@
+# EKS: ECR images, 3-instance Postgres on gp3, zone spread, Strimzi Kafka over TLS + SCRAM.
+# Set the registry at install time, e.g. --set image.registry=<account>.dkr.ecr.<region>.amazonaws.com
+# (images become <registry>/localarena/api:<tag>).
+image:
+  registry: "<account>.dkr.ecr.<region>.amazonaws.com"
+  api: { repository: localarena/api, tag: dev, pullPolicy: IfNotPresent }
+  gameserver: { repository: localarena/gameserver, tag: dev, pullPolicy: IfNotPresent }
+
+postgres:
+  instances: 3
+  poolerInstances: 2
+  storage: 20Gi
+  storageClass: gp3
+
+spread:
+  zone: true
+
+kafka:
+  bootstrap: localarena-kafka-bootstrap.data.svc:9093
+  auth:
+    enabled: true

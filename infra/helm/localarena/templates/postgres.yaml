@@ -14,7 +14,11 @@ spec:
   postgresql:
     parameters: { log_lock_waits: "on", deadlock_timeout: "200ms", track_io_timing: "on", max_connections: "100" }
   bootstrap: { initdb: { database: localarena, owner: localarena } }
-  storage: { size: {{ .Values.postgres.storage }} }
+  storage:
+    size: {{ .Values.postgres.storage }}
+    {{- with .Values.postgres.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
   resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
 ---
 apiVersion: postgresql.cnpg.io/v1

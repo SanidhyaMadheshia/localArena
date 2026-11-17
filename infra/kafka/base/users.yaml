@@ -1,0 +1,169 @@
+# One KafkaUser per service (scram-sha-512). Secrets (same name as the user, keys
+# `password` and `sasl.jaas.config`) are written to namespace `data`; see
+# scripts/k8s-kafka-copy-secrets.sh. ACLs are derived from the code:
+#   gameserver  backend/internal/events/publisher.go   (producer only)
+#   rewards     backend/internal/rewards/rewards.go     (3 consumer groups, produce, no transactions)
+#   streams     streams/.../Main.java + Topologies.java (EXACTLY_ONCE_V2)
+#   connect     compose.yaml connect + connect/outbox-connector.json (Debezium outbox)
+#   eventcat    backend/cmd/eventcat/main.go            (reads, no consumer group)
+# franz-go and the Java producers are idempotent by default; IdempotentWrite on the
+# cluster keeps older-client behaviour working (Kafka >= 3.0 no longer requires it).
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-gameserver
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # Publisher writes match/player/telemetry events. Describe is needed for metadata/partition lookup.
+      - resource: { type: topic, name: game.match-events.v1, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: game.player-events.v1, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: game.server-telemetry.v1, patternType: literal }
+        operations: [Write, Describe]
+      # Idempotent producer (franz-go default).
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-api
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # The API does not use Kafka today (no Kafka code in backend/cmd/api). Reserved
+      # read-only access to the Streams output topics it would serve (leaderboard, sessions).
+      - resource: { type: topic, name: game.leaderboard-updates.v1, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: game.player-sessions.v1, patternType: literal }
+        operations: [Read, Describe]
+      # Consumer groups for the API (prefix localarena-api).
+      - resource: { type: group, name: localarena-api, patternType: prefix }
+        operations: [Read]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-rewards
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # planner consumes match events.
+      - resource: { type: topic, name: game.match-events.v1, patternType: literal }
+        operations: [Read, Describe]
+      # saga consumes commands, and the planner produces them.
+      - resource: { type: topic, name: game.reward-commands.v1, patternType: literal }
+        operations: [Read, Write, Describe]
+      # retry worker consumes retry topic; saga produces to it (delayed by not-before header).
+      - resource: { type: topic, name: game.reward-commands-retry.v1, patternType: literal }
+        operations: [Read, Write, Describe]
+      # exhausted commands are produced to the DLQ.
+      - resource: { type: topic, name: game.reward-commands-dlq.v1, patternType: literal }
+        operations: [Write, Describe]
+      # groups: localarena-rewards-planner / -saga / -retry.
+      - resource: { type: group, name: localarena-rewards, patternType: prefix }
+        operations: [Read]
+      # Idempotent producer; the worker does not use Kafka transactions (no TransactionalId ACL).
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-streams
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # Source topics.
+      - resource: { type: topic, name: game.match-events.v1, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: game.player-events.v1, patternType: literal }
+        operations: [Read, Describe]
+      # Output topics + DLQ for poison records.
+      - resource: { type: topic, name: game.leaderboard-updates.v1, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: game.player-sessions.v1, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: game.invalid-events.v1, patternType: literal }
+        operations: [Write, Describe]
+      # Internal changelog and repartition topics (application.id = localarena-streams).
+      # Create is needed because Streams creates them itself; Delete for repartition purge.
+      - resource: { type: topic, name: localarena-streams-, patternType: prefix }
+        operations: [Read, Write, Describe, DescribeConfigs, Create, Delete]
+      # Consumer group = application.id.
+      - resource: { type: group, name: localarena-streams, patternType: prefix }
+        operations: [Read, Describe]
+      # EXACTLY_ONCE_V2: transactional.id is derived from application.id.
+      - resource: { type: transactionalId, name: localarena-streams, patternType: prefix }
+        operations: [Write, Describe]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-connect
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # Outbox event router publishes here (connect/outbox-connector.json).
+      - resource: { type: topic, name: game.economy-events.v1, patternType: literal }
+        operations: [Write, Describe, DescribeConfigs]
+      # Connect internal topics (connect.configs / connect.offsets / connect.status). Worker creates them.
+      - resource: { type: topic, name: connect., patternType: prefix }
+        operations: [Read, Write, Describe, DescribeConfigs, Create]
+      # Debezium heartbeat topic (heartbeat.interval.ms is set on the connector).
+      - resource: { type: topic, name: __debezium-heartbeat., patternType: prefix }
+        operations: [Write, Describe, DescribeConfigs, Create]
+      # Worker group (GROUP_ID localarena-connect).
+      - resource: { type: group, name: localarena-connect, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-eventcat
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # eventcat tails/replays any game.* topic. It uses no consumer group.
+      - resource: { type: topic, name: game., patternType: prefix }
+        operations: [Read, Describe]
+      # eventcat -replay re-produces records verbatim onto the match-events topic only.
+      - resource: { type: topic, name: game.match-events.v1, patternType: literal }
+        operations: [Write]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: localarena-admin
+  labels: { strimzi.io/cluster: localarena }
+spec:
+  # Super user (declared in Kafka.spec.kafka.authorization.superUsers): tooling, kafka-topics/acls CLI,
+  # break-glass. No ACL list needed. Do not give this secret to workloads.
+  authentication: { type: scram-sha-512 }

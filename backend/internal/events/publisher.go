@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/kafkaconf"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -115,7 +116,12 @@ func New(opts Options, log *slog.Logger) (*Publisher, error) {
 	if opts.ReplayInterval == 0 {
 		opts.ReplayInterval = 2 * time.Second
 	}
-	cl, err := kgo.NewClient(
+	// TLS/SCRAM come from KAFKA_* env vars; unset means plaintext (Compose).
+	authOpts, err := kafkaconf.FromEnv()
+	if err != nil {
+		return nil, err
+	}
+	cl, err := kgo.NewClient(append(authOpts,
 		kgo.SeedBrokers(opts.Brokers...),
 		// Idempotent producer with acks=all (franz-go defaults): broker-side
 		// dedupe of retried batches and no loss while min ISR (2) is met.
@@ -125,7 +131,7 @@ func New(opts Options, log *slog.Logger) (*Publisher, error) {
 		kgo.MaxBufferedRecords(opts.MaxBuffered),
 		kgo.RecordDeliveryTimeout(opts.DeliveryTimeout),
 		kgo.UnknownTopicRetries(-1),
-	)
+	)...)
 	if err != nil {
 		return nil, err
 	}

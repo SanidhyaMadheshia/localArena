@@ -30,6 +30,7 @@ import (
 
 	eventsv1 "github.com/SanidhyaMadheshia/localArena/backend/gen/events/v1"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/eventid"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/kafkaconf"
 	"github.com/SanidhyaMadheshia/localArena/backend/internal/store"
 )
 
@@ -119,9 +120,13 @@ func (w *Worker) Run(ctx context.Context) error {
 type handler func(ctx context.Context, r *kgo.Record) ([]*kgo.Record, error)
 
 func (w *Worker) consume(ctx context.Context, group string, topics []string, h handler) error {
-	cl, err := kgo.NewClient(kgo.SeedBrokers(w.Brokers...), kgo.ConsumerGroup(group), kgo.ConsumeTopics(topics...),
+	authOpts, err := kafkaconf.FromEnv()
+	if err != nil {
+		return err
+	}
+	cl, err := kgo.NewClient(append(authOpts, kgo.SeedBrokers(w.Brokers...), kgo.ConsumerGroup(group), kgo.ConsumeTopics(topics...),
 		kgo.DisableAutoCommit(), kgo.BlockRebalanceOnPoll(), kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		kgo.FetchIsolationLevel(kgo.ReadCommitted()), kgo.RequiredAcks(kgo.AllISRAcks()))
+		kgo.FetchIsolationLevel(kgo.ReadCommitted()), kgo.RequiredAcks(kgo.AllISRAcks()))...)
 	if err != nil {
 		return err
 	}

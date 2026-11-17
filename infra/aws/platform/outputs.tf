@@ -1,0 +1,1 @@
+../../opentofu/outputs.tf

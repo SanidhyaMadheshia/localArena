@@ -4,10 +4,10 @@ metadata:
 spec:
   {{- include "la.podSecurity" .root | nindent 2 }}
   terminationGracePeriodSeconds: 20
-  {{- include "la.spread" "api" | nindent 2 }}
+  {{- include "la.spread" (dict "app" "api" "root" .root) | nindent 2 }}
   containers:
     - name: api
-      image: {{ .root.Values.image.api.repository }}:{{ .tag }}
+      image: {{ include "la.image" (dict "root" .root "img" .root.Values.image.api "tag" .tag) }}
       imagePullPolicy: {{ .root.Values.image.api.pullPolicy }}
       ports: [{ name: http, containerPort: 8081 }]
       env:

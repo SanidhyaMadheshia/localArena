@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	eventsv1 "github.com/SanidhyaMadheshia/localArena/backend/gen/events/v1"
+	"github.com/SanidhyaMadheshia/localArena/backend/internal/kafkaconf"
 )
 
 var failedReplays atomic.Int64
@@ -38,8 +39,13 @@ func main() {
 	if *fromStart {
 		off = kgo.NewOffset().AtStart()
 	}
-	cl, err := kgo.NewClient(kgo.SeedBrokers(strings.Split(*brokers, ",")...),
-		kgo.ConsumeTopics(strings.Split(*topic, ",")...), kgo.ConsumeResetOffset(off))
+	authOpts, err := kafkaconf.FromEnv()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	cl, err := kgo.NewClient(append(authOpts, kgo.SeedBrokers(strings.Split(*brokers, ",")...),
+		kgo.ConsumeTopics(strings.Split(*topic, ",")...), kgo.ConsumeResetOffset(off))...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

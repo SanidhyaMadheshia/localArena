@@ -187,3 +187,27 @@ drills-007:
 	kubectl -n argocd patch app localarena --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
 	experiments/007-week7-delivery/drills.sh
 	kubectl -n argocd patch app localarena --type merge -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
+
+# ---- AWS prep: 3-zone kind + Strimzi ----
+# One kind cluster (localarena-3z: 3 workers labelled zone a/b/c) with Strimzi + Kafka.
+# Docker Desktop's socket may be dead; the native engine is reached via DOCKER_CONTEXT=default.
+.PHONY: k8s3z-cluster k8s3z-kafka k8s3z-verify k8s3z-down
+K3Z_CTX ?= kind-localarena-3z
+STRIMZI_CHART_VERSION ?= 1.3.1
+K3Z_OVERLAY ?= kind
+k8s3z-cluster:
+	DOCKER_CONTEXT=default kind get clusters | grep -qx localarena-3z || DOCKER_CONTEXT=default kind create cluster --config infra/kubernetes/kind/cluster-3zone.yaml --wait 120s
+k8s3z-kafka:
+	helm repo add strimzi https://strimzi.io/charts/ --force-update
+	kubectl --context $(K3Z_CTX) create ns data --dry-run=client -o yaml | kubectl --context $(K3Z_CTX) apply -f -
+	helm --kube-context $(K3Z_CTX) upgrade --install strimzi strimzi/strimzi-kafka-operator --version $(STRIMZI_CHART_VERSION) \
+		-n strimzi-system --create-namespace -f infra/kubernetes/helm/strimzi-values.yaml --wait
+	kubectl --context $(K3Z_CTX) apply -k infra/kafka/overlays/$(K3Z_OVERLAY)
+	kubectl --context $(K3Z_CTX) -n data wait kafka/localarena --for=condition=Ready --timeout=900s
+	kubectl --context $(K3Z_CTX) -n data wait kafkatopic --all --for=condition=Ready --timeout=300s
+	kubectl --context $(K3Z_CTX) -n data wait kafkauser --all --for=condition=Ready --timeout=300s
+	KUBECTL_CONTEXT=$(K3Z_CTX) scripts/k8s-kafka-copy-secrets.sh
+k8s3z-verify:
+	scripts/k8s-kafka-verify.sh
+k8s3z-down:
+	DOCKER_CONTEXT=default kind delete cluster --name localarena-3z

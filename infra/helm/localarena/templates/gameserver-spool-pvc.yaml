@@ -1,0 +1,13 @@
+{{- if and .Values.kafka.bootstrap .Values.gameserver.spool.enabled .Values.gameserver.spool.pvc.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gameserver-spool
+  labels: {{- include "la.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.gameserver.spool.pvc.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources: { requests: { storage: {{ .Values.gameserver.spool.pvc.size }} } }
+{{- end }}

@@ -47,8 +47,54 @@ public final class Main {
         return v == null || v.isBlank() ? def : v;
     }
 
+    /** Quotes a value for use inside a JAAS config string. */
+    static String jaasQuote(String v) {
+        return "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    /**
+     * Adds TLS/SASL client settings from KAFKA_SECURITY_PROTOCOL, KAFKA_SASL_MECHANISM,
+     * KAFKA_USERNAME, KAFKA_PASSWORD and KAFKA_CA_FILE. Nothing is set for PLAINTEXT/unset.
+     */
+    static void applySecurity(Properties p, java.util.function.Function<String, String> getenv) {
+        java.util.function.BiFunction<String, String, String> e = (k, def) -> {
+            var v = getenv.apply(k);
+            return v == null || v.isBlank() ? def : v.trim();
+        };
+        var proto = e.apply("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").toUpperCase();
+        if (proto.equals("PLAINTEXT")) return;
+        if (!proto.equals("SSL") && !proto.equals("SASL_SSL")) {
+            throw new IllegalArgumentException("unknown KAFKA_SECURITY_PROTOCOL: " + proto);
+        }
+        p.put("security.protocol", proto);
+        var ca = e.apply("KAFKA_CA_FILE", "");
+        if (!ca.isEmpty()) {
+            p.put("ssl.truststore.type", "PEM");
+            p.put("ssl.truststore.location", ca);
+        }
+        if (proto.equals("SASL_SSL")) {
+            var user = getenv.apply("KAFKA_USERNAME");
+            var pass = getenv.apply("KAFKA_PASSWORD");
+            if (user == null || user.isEmpty() || pass == null || pass.isEmpty()) {
+                throw new IllegalArgumentException("SASL_SSL requires KAFKA_USERNAME and KAFKA_PASSWORD");
+            }
+            var mech = e.apply("KAFKA_SASL_MECHANISM", "SCRAM-SHA-512").toUpperCase();
+            if (!mech.equals("SCRAM-SHA-512") && !mech.equals("SCRAM-SHA-256")) {
+                throw new IllegalArgumentException("unsupported KAFKA_SASL_MECHANISM: " + mech);
+            }
+            p.put("sasl.mechanism", mech);
+            p.put("sasl.jaas.config", "org.apache.kafka.common.security.scram.ScramLoginModule required username="
+                    + jaasQuote(user) + " password=" + jaasQuote(pass) + ";");
+        }
+    }
+
     static Properties config() {
+        return config(System::getenv);
+    }
+
+    static Properties config(java.util.function.Function<String, String> getenv) {
         var p = new Properties();
+        applySecurity(p, getenv);
         p.put(StreamsConfig.APPLICATION_ID_CONFIG, env("APPLICATION_ID", "localarena-streams"));
         p.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, env("KAFKA_BROKERS", "localhost:29092"));
         // Kafka-to-Kafka exactly-once: input offsets, state-store changelogs and

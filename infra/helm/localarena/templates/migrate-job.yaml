@@ -21,7 +21,7 @@ spec:
       {{- include "la.podSecurity" . | nindent 6 }}
       initContainers: # first install: wait for the CNPG cluster and its app secret
         - name: wait-db
-          image: {{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}
+          image: {{ include "la.image" (dict "root" . "img" .Values.image.api "tag" .Values.image.api.tag) }}
           imagePullPolicy: {{ .Values.image.api.pullPolicy }}
           command: ["/migrate", "version"]
           env:
@@ -30,7 +30,7 @@ spec:
           {{- include "la.containerSecurity" . | nindent 10 }}
       containers:
         - name: migrate
-          image: {{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}
+          image: {{ include "la.image" (dict "root" . "img" .Values.image.api "tag" .Values.image.api.tag) }}
           imagePullPolicy: {{ .Values.image.api.pullPolicy }}
           command: ["/migrate", "up"]
           env:
